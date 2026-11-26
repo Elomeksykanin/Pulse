@@ -29,12 +29,28 @@ public partial class App : Application
         {
             preferences = new GamePreferences();
             MessageBox.Show(
-                $"Nie udało się odczytać ustawień Pulse. Zostanie użyty język polski.\n{ex.Message}",
+                $"Nie udało się odczytać ustawień Pulse. Zostanie użyty język polski.\n" +
+                $"Could not read Pulse settings. Polish will be used.\n{ex.Message}",
                 "Ustawienia Pulse", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         var language = preferences.Language is "en" ? "en" : "pl";
         var splash = new SplashWindow(language);
+        splash.LanguageChanged += selectedLanguage =>
+        {
+            preferences.Language = selectedLanguage;
+            try
+            {
+                preferences.Save();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                var message = selectedLanguage == "en"
+                    ? $"Language changed, but the setting could not be saved:\n{ex.Message}"
+                    : $"Język zmieniono, ale nie udało się zapisać ustawienia:\n{ex.Message}";
+                MessageBox.Show(splash, message, "Pulse", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        };
         splash.EnterRequested += (_, _) =>
         {
             var main = new MainWindow(preferences);
