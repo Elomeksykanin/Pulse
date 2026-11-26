@@ -1,13 +1,9 @@
-# Pulse 0.1.6
+# Pulse 0.1.7
 
 ## Polski
-- Odświeżono okno aktualizacji i dodano listę zmian.
-- Podczas pobierania aktualizacji wyświetla się postęp.
-- Po błędzie pobierania można ponowić próbę bez zamykania aplikacji.
-- Ekran startowy wyświetla prawidłowy numer wersji.
+- Raport analizy ogólnej można teraz kopiować do schowka lub zapisać jako plik TXT.
+- Pulse zapamiętuje ostatnio wybraną grę i przywraca ją przy kolejnym uruchomieniu.
 
 ## English
-- Redesigned the update dialog and added release notes.
-- Update downloads now show progress.
-- Failed downloads can be retried without closing the application.
-- The splash screen now shows the correct version number.
+- General analysis reports can now be copied to the clipboard or saved as TXT files.
+- Pulse remembers the last selected game and restores it on the next launch.

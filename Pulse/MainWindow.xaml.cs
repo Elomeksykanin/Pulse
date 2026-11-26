@@ -11,6 +11,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Velopack;
 using Velopack.Sources;
 
@@ -19,6 +20,7 @@ namespace Pulse;
 public partial class MainWindow : Window
 {
     private readonly UpdateManager _updateManager = new(new GithubSource("https://github.com/Elomeksykanin/Pulse", null, false, null));
+    private readonly GamePreferences _gamePreferences;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _generalAnalysisTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly Queue<double> _cpuHistory = new();
@@ -42,6 +44,7 @@ public partial class MainWindow : Window
     private bool _generalSampleBusy;
     private bool _generalAnalysisRunning;
     private bool _updateCheckRunning;
+    private string _lastGeneralReport = "";
     private DateTime _generalAnalysisStartedAt;
     private TimeSpan _generalAnalysisDuration;
     private double? _lastGpuBusyPercent;
@@ -56,7 +59,18 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.6"}";
+        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.7"}";
+        try
+        {
+            _gamePreferences = GamePreferences.Load();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            _gamePreferences = new GamePreferences();
+            MessageBox.Show(this,
+                $"Nie udało się odczytać zapamiętanej gry. Możesz wybrać ją ponownie.\n{ex.Message}",
+                "Ustawienia gry", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();
@@ -304,7 +318,7 @@ public partial class MainWindow : Window
         _generalAnalysisRunning = false;
         _generalAnalysisTimer.Stop();
         GeneralProgress.Value = Math.Clamp((DateTime.UtcNow - _generalAnalysisStartedAt).TotalSeconds / _generalAnalysisDuration.TotalSeconds, 0, 1);
-        RenderGeneralReport(BuildGeneralAnalysisReport());
+        RenderGeneralReport(BuildGeneralAnalysisReport(), true);
         GeneralStatusText.Text = $"Analiza zakończona • {_generalSystemSamples.Count} próbek systemu • czas: {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min.";
         StatusText.Text = "●  ANALIZA ZAKOŃCZONA";
         StatusText.Foreground = (Brush)FindResource("Accent");
@@ -318,8 +332,11 @@ public partial class MainWindow : Window
         GeneralStopButton.IsEnabled = running && !_generalSampleBusy;
     }
 
-    private void RenderGeneralReport(string report)
+    private void RenderGeneralReport(string report, bool completed = false)
     {
+        _lastGeneralReport = completed ? report : "";
+        CopyGeneralReportButton.IsEnabled = completed;
+        ExportGeneralReportButton.IsEnabled = completed;
         GeneralReportContent.Children.Clear();
         foreach (var line in report.Split('\n'))
         {
@@ -346,6 +363,51 @@ public partial class MainWindow : Window
                     : isBullet ? new Thickness(8, 0, 0, 0) : new Thickness(0)
             };
             GeneralReportContent.Children.Add(text);
+        }
+    }
+
+    private void CopyGeneralReport(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
+            return;
+
+        try
+        {
+            Clipboard.SetText(_lastGeneralReport);
+            GeneralStatusText.Text = "Raport skopiowano do schowka.";
+        }
+        catch (System.Runtime.InteropServices.ExternalException ex)
+        {
+            MessageBox.Show(this, $"Nie udało się skopiować raportu:\n{ex.Message}",
+                "Błąd schowka", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ExportGeneralReport(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
+            return;
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Zapisz raport Pulse",
+            FileName = $"Pulse-report-{DateTime.Now:yyyyMMdd-HHmm}.txt",
+            Filter = "Raport tekstowy (*.txt)|*.txt",
+            DefaultExt = ".txt",
+            AddExtension = true
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, _lastGeneralReport);
+            GeneralStatusText.Text = $"Zapisano raport: {dialog.FileName}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            MessageBox.Show(this, ex.Message, "Nie udało się zapisać raportu",
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -622,7 +684,22 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             _selectedGame = null;
             UpdateSelectedGame();
         }
+        if (_selectedGame is null)
+            RestoreLastGame();
         StatusText.Text = _games.Count > 0 ? $"●  GOTOWY · {_games.Count} OKIEN" : "●  GOTOWY";
+    }
+
+    private void RestoreLastGame()
+    {
+        if (string.IsNullOrWhiteSpace(_gamePreferences.LastGameName))
+            return;
+
+        _selectedGame = _games.FirstOrDefault(game =>
+            string.Equals(game.Name, _gamePreferences.LastGameName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(game.Title, _gamePreferences.LastGameTitle, StringComparison.OrdinalIgnoreCase))
+            ?? _games.FirstOrDefault(game =>
+                string.Equals(game.Name, _gamePreferences.LastGameName, StringComparison.OrdinalIgnoreCase));
+        UpdateSelectedGame();
     }
 
     private void ChooseGame(object sender, RoutedEventArgs e)
@@ -631,6 +708,17 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         if (picker.ShowDialog() == true)
         {
             _selectedGame = picker.SelectedGame;
+            _gamePreferences.LastGameName = _selectedGame?.Name;
+            _gamePreferences.LastGameTitle = _selectedGame?.Title;
+            try
+            {
+                _gamePreferences.Save();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                MessageBox.Show(this, $"Gra została wybrana, ale nie udało się jej zapamiętać:\n{ex.Message}",
+                    "Ustawienia gry", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
             UpdateSelectedGame();
         }
     }
