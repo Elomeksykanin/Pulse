@@ -20,7 +20,9 @@ dotnet build .\Pulse\Pulse.csproj -c Release
 
 Instalator oraz aktualizacje są publikowane jako GitHub Releases. Pulse sprawdza aktualizacje przy uruchomieniu, a po zgodzie pobiera je i uruchamia ponownie aplikację. Automatyczne aktualizacje działają dla wersji zainstalowanej instalatorem Velopack; uruchomienie skopiowanego pliku EXE nie wystarcza.
 
-Nowe wydanie tworzy się przez workflow **Release** na karcie **Actions**, podając wersję w formacie `X.Y.Z` (np. `0.1.3`), albo przez wypchnięcie tagu `vX.Y.Z`. Workflow buduje instalator i publikuje pliki aktualizacji. Zwiększ wersję w `Pulse/Pulse.csproj` przed kolejnym wydaniem.
+Nowe wydanie tworzy się przez workflow **Release** na karcie **Actions**, podając wersję w formacie `X.Y.Z` (np. `0.1.5`), albo przez wypchnięcie tagu `vX.Y.Z`. Workflow buduje instalator i publikuje pliki aktualizacji. Przed kolejnym wydaniem zwiększ wersję w `Pulse/Pulse.csproj` i zaktualizuj `CHANGELOG.md`.
+
+Okno aktualizacji pokazuje informacje o wydaniu i postęp pobierania. Jeśli pobieranie się nie powiedzie, można ponowić próbę bez zamykania aplikacji.
 
 ## Co mierzy
 

@@ -56,7 +56,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.3"}";
+        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.5"}";
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();
@@ -114,18 +114,34 @@ public partial class MainWindow : Window
             }
 
             var version = update.TargetFullRelease.Version;
-            var updateDialog = new UpdateDialog(version.ToString()) { Owner = this };
-            if (updateDialog.ShowDialog() != true)
+            var updateDialog = new UpdateDialog(
+                version.ToString(),
+                update.TargetFullRelease.NotesMarkdown ?? "Brak opisu zmian dla tej wersji.")
+            { Owner = this };
+            updateDialog.Show();
+            while (await updateDialog.WaitForDownloadDecisionAsync())
             {
-                StatusText.Text = "●  DOSTĘPNA AKTUALIZACJA";
-                return;
+                try
+                {
+                    StatusText.Text = "●  POBIERAM AKTUALIZACJĘ";
+                    await _updateManager.DownloadUpdatesAsync(update, percent =>
+                        Dispatcher.InvokeAsync(() =>
+                        {
+                            StatusText.Text = $"●  POBIERAM AKTUALIZACJĘ {percent}%";
+                            updateDialog.SetProgress(percent);
+                        }));
+                    updateDialog.CloseForRestart();
+                    StatusText.Text = "●  PONOWNIE URUCHAMIAM";
+                    _updateManager.ApplyUpdatesAndRestart(update.TargetFullRelease);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    updateDialog.ShowDownloadError(ex.Message);
+                    StatusText.Text = "●  BŁĄD AKTUALIZACJI";
+                }
             }
-
-            StatusText.Text = "●  POBIERAM AKTUALIZACJĘ";
-            await _updateManager.DownloadUpdatesAsync(update, percent =>
-                Dispatcher.InvokeAsync(() => StatusText.Text = $"●  POBIERAM AKTUALIZACJĘ {percent}%"));
-            StatusText.Text = "●  PONOWNIE URUCHAMIAM";
-            _updateManager.ApplyUpdatesAndRestart(update.TargetFullRelease);
+            StatusText.Text = "●  DOSTĘPNA AKTUALIZACJA";
         }
         catch (Exception ex)
         {
