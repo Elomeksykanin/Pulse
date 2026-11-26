@@ -10,17 +10,20 @@ public partial class GamePickerWindow : Window
 {
     private readonly ObservableCollection<GameWindowInfo> _games;
     private readonly ICollectionView _view;
+    private readonly string _language;
     public GameWindowInfo? SelectedGame { get; private set; }
 
-    public GamePickerWindow(IEnumerable<GameWindowInfo> games)
+    public GamePickerWindow(IEnumerable<GameWindowInfo> games, string language)
     {
         InitializeComponent();
+        _language = language;
+        UiLanguage.Apply(this, _language);
         _games = new ObservableCollection<GameWindowInfo>(games);
         _view = CollectionViewSource.GetDefaultView(_games);
         _view.Filter = FilterGame;
         GameList.ItemsSource = _view;
         UpdateCount();
-        SearchBox.ToolTip = "Szukaj po nazwie gry lub procesu";
+        SearchBox.ToolTip = UiLanguage.Get("Szukaj po nazwie gry lub procesu", _language);
     }
 
     private bool FilterGame(object item)
@@ -42,7 +45,9 @@ public partial class GamePickerWindow : Window
     {
         if (CountLabel is null) return;
         var count = _view?.Cast<object>().Count() ?? 0;
-        CountLabel.Text = count == 0 ? "Brak pasujących okien — zmień frazę wyszukiwania." : $"{count} aktywnych okien • wybierz proces gry do pomiaru";
+        CountLabel.Text = count == 0
+            ? UiLanguage.Get("Brak pasujących okien — zmień frazę wyszukiwania.", _language)
+            : $"{count} {UiLanguage.Get("aktywnych okien • wybierz proces gry do pomiaru", _language)}";
     }
 
     private void GameSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)

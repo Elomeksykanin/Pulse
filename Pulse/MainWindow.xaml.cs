@@ -20,7 +20,7 @@ namespace Pulse;
 public partial class MainWindow : Window
 {
     private readonly UpdateManager _updateManager = new(new GithubSource("https://github.com/Elomeksykanin/Pulse", null, false, null));
-    private readonly GamePreferences _gamePreferences;
+    private readonly GamePreferences _preferences;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _generalAnalysisTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly Queue<double> _cpuHistory = new();
@@ -44,6 +44,8 @@ public partial class MainWindow : Window
     private bool _generalSampleBusy;
     private bool _generalAnalysisRunning;
     private bool _updateCheckRunning;
+    private bool _suppressLanguageChange;
+    private string _language = "pl";
     private string _lastGeneralReport = "";
     private DateTime _generalAnalysisStartedAt;
     private TimeSpan _generalAnalysisDuration;
@@ -56,26 +58,26 @@ public partial class MainWindow : Window
     private Visibility _summaryPanelVisibility;
     private Visibility _awaitingResultsPanelVisibility;
 
-    public MainWindow()
+    public MainWindow(GamePreferences preferences)
     {
+        _preferences = preferences;
+        _language = _preferences.Language is "en" ? "en" : "pl";
         InitializeComponent();
-        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.7"}";
-        try
-        {
-            _gamePreferences = GamePreferences.Load();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            _gamePreferences = new GamePreferences();
-            MessageBox.Show(this,
-                $"Nie udało się odczytać zapamiętanej gry. Możesz wybrać ją ponownie.\n{ex.Message}",
-                "Ustawienia gry", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+        _suppressLanguageChange = true;
+        LanguageSelector.SelectedValue = _language;
+        UiLanguage.Apply(this, _language);
+        _suppressLanguageChange = false;
+        AppVersionText.Text = UiLanguage.Get(
+            $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.8"}",
+            _language);
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();
         _generalAnalysisTimer.Tick += async (_, _) => await SampleGeneralAnalysis();
-        Loaded += (_, _) => RefreshGames(null, null);
+        Loaded += (_, _) =>
+        {
+            RefreshGames(null, null);
+        };
         Loaded += async (_, _) => await CheckForUpdatesAsync(false);
         Closing += (_, _) =>
         {
@@ -84,6 +86,50 @@ public partial class MainWindow : Window
             _frameRateCapture?.Dispose();
             try { _hardwareSensors?.Dispose(); } catch { }
         };
+    }
+
+    private void LanguageChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressLanguageChange || LanguageSelector.SelectedValue is not string language || language is not ("pl" or "en"))
+            return;
+
+        _language = language;
+        _preferences.Language = language;
+        try
+        {
+            _preferences.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            MessageBox.Show(this, $"Język zmieniono, ale nie udało się zapisać ustawienia:\n{ex.Message}",
+                "Ustawienia języka", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        UiLanguage.Apply(this, language);
+        AppVersionText.Text = UiLanguage.Get(
+            $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.8"}",
+            language);
+        UpdateSelectedGame();
+        SetAwaitingText(_timer.IsEnabled);
+        if (_timer.IsEnabled)
+        {
+            MonitorButton.Content = T("■  Zakończ pomiar", "■  Stop monitoring");
+            StatusText.Text = T("●  POMIAR W TOKU", "●  MONITORING");
+            UpdateFrameMetrics();
+        }
+        else if (SummaryPanel.Visibility == Visibility.Visible)
+        {
+            MonitorButton.Content = T("▶  Rozpocznij", "▶  Start monitoring");
+            SummaryHeading.Text = $"{T("WYNIK SESJI", "SESSION RESULTS")}  ·  {DateTime.Now:HH:mm}";
+            SummaryText.Text = BuildSummary();
+        }
+        if (_generalAnalysisRunning)
+            GeneralStatusText.Text = T("Analiza jest w toku.", "Analysis is running.");
+        else if (_generalSystemSamples.Count > 0)
+            GeneralStatusText.Text = T(
+                $"Analiza zakończona • {_generalSystemSamples.Count} próbek systemu.",
+                $"Analysis complete • {_generalSystemSamples.Count} system samples.");
+        if (_generalSystemSamples.Count > 0 && !_generalAnalysisRunning)
+            RenderGeneralReport(BuildGeneralAnalysisReport());
     }
 
     private async void CheckForUpdates(object sender, RoutedEventArgs e)
@@ -102,8 +148,9 @@ public partial class MainWindow : Window
             {
                 var result = MessageBox.Show(
                     this,
-                    "Automatyczne aktualizacje działają po zainstalowaniu Pulse. Otworzyć stronę wydań, aby pobrać instalator?",
-                    "Zainstaluj Pulse",
+                    T("Automatyczne aktualizacje działają po zainstalowaniu Pulse. Otworzyć stronę wydań, aby pobrać instalator?",
+                        "Automatic updates require the installed version of Pulse. Open the releases page to download the installer?"),
+                    T("Zainstaluj Pulse", "Install Pulse"),
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Information);
 
@@ -117,51 +164,54 @@ public partial class MainWindow : Window
         UpdateButton.IsEnabled = false;
         try
         {
-            StatusText.Text = "●  SPRAWDZAM AKTUALIZACJE";
+            StatusText.Text = T("●  SPRAWDZAM AKTUALIZACJE", "●  CHECKING FOR UPDATES");
             var update = await _updateManager.CheckForUpdatesAsync();
             if (update is null)
             {
-                StatusText.Text = "●  APLIKACJA JEST AKTUALNA";
+                StatusText.Text = T("●  APLIKACJA JEST AKTUALNA", "●  APP IS UP TO DATE");
                 if (userInitiated)
-                    MessageBox.Show(this, "Masz najnowszą wersję Pulse.", "Aktualizacje", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show(this, T("Masz najnowszą wersję Pulse.", "Pulse is up to date."),
+                        T("Aktualizacje", "Updates"), MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var version = update.TargetFullRelease.Version;
             var updateDialog = new UpdateDialog(
                 version.ToString(),
-                update.TargetFullRelease.NotesMarkdown ?? "Brak opisu zmian dla tej wersji.")
+                update.TargetFullRelease.NotesMarkdown ?? T("Brak opisu zmian dla tej wersji.", "No release notes are available for this version."),
+                _language)
             { Owner = this };
             updateDialog.Show();
             while (await updateDialog.WaitForDownloadDecisionAsync())
             {
                 try
                 {
-                    StatusText.Text = "●  POBIERAM AKTUALIZACJĘ";
+                    StatusText.Text = T("●  POBIERAM AKTUALIZACJĘ", "●  DOWNLOADING UPDATE");
                     await _updateManager.DownloadUpdatesAsync(update, percent =>
                         Dispatcher.InvokeAsync(() =>
                         {
-                            StatusText.Text = $"●  POBIERAM AKTUALIZACJĘ {percent}%";
+                            StatusText.Text = T($"●  POBIERAM AKTUALIZACJĘ {percent}%", $"●  DOWNLOADING UPDATE {percent}%");
                             updateDialog.SetProgress(percent);
                         }));
                     updateDialog.CloseForRestart();
-                    StatusText.Text = "●  PONOWNIE URUCHAMIAM";
+                    StatusText.Text = T("●  PONOWNIE URUCHAMIAM", "●  RESTARTING");
                     _updateManager.ApplyUpdatesAndRestart(update.TargetFullRelease);
                     return;
                 }
                 catch (Exception ex)
                 {
                     updateDialog.ShowDownloadError(ex.Message);
-                    StatusText.Text = "●  BŁĄD AKTUALIZACJI";
+                    StatusText.Text = T("●  BŁĄD AKTUALIZACJI", "●  UPDATE FAILED");
                 }
             }
-            StatusText.Text = "●  DOSTĘPNA AKTUALIZACJA";
+            StatusText.Text = T("●  DOSTĘPNA AKTUALIZACJA", "●  UPDATE AVAILABLE");
         }
         catch (Exception ex)
         {
-            StatusText.Text = "●  NIE UDAŁO SIĘ SPRAWDZIĆ AKTUALIZACJI";
+            StatusText.Text = T("●  NIE UDAŁO SIĘ SPRAWDZIĆ AKTUALIZACJI", "●  UPDATE CHECK FAILED");
             if (userInitiated)
-                MessageBox.Show(this, $"Nie udało się sprawdzić lub zainstalować aktualizacji:\n{ex.Message}", "Błąd aktualizacji", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(this, $"{T("Nie udało się sprawdzić aktualizacji:", "Could not check for updates:")}\n{ex.Message}",
+                    T("Błąd aktualizacji", "Update error"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -212,16 +262,21 @@ public partial class MainWindow : Window
             isActive ? (byte)72 : (byte)25));
     }
 
+    private string T(string polish, string english) => _language == "en" ? english : polish;
+
     private async void StartGeneralAnalysis(object sender, RoutedEventArgs e)
     {
         if (_timer.IsEnabled)
         {
-            MessageBox.Show(this, "Zakończ najpierw pomiar gry, aby nie mieszać wyników obu analiz.", "Analiza już działa", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this,
+                T("Zakończ najpierw pomiar gry, aby nie mieszać wyników obu analiz.",
+                    "Stop game monitoring first so the two analyses do not overlap."),
+                T("Analiza już działa", "Analysis already running"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         if (!int.TryParse(GeneralDurationBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) || minutes is < 1 or > 120)
         {
-            GeneralStatusText.Text = "Wpisz czas od 1 do 120 minut.";
+            GeneralStatusText.Text = T("Wpisz czas od 1 do 120 minut.", "Enter a duration from 1 to 120 minutes.");
             GeneralDurationBox.Focus();
             return;
         }
@@ -237,9 +292,11 @@ public partial class MainWindow : Window
         GeneralStartButton.IsEnabled = false;
         GeneralStopButton.IsEnabled = true;
         GeneralProgress.Value = 0;
-        RenderGeneralReport("Zbieram próbki. Używaj komputera tak jak zwykle; nic nie zostanie automatycznie zamknięte.");
-        GeneralStatusText.Text = $"Analiza trwa {minutes} min. Próbkowanie co 5 sekund.";
-        StatusText.Text = "●  ANALIZA OGÓLNA";
+        RenderGeneralReport(T(
+            "Zbieram próbki. Używaj komputera tak jak zwykle; nic nie zostanie automatycznie zamknięte.",
+            "Collecting samples. Use your computer normally; no programs will be closed."));
+        GeneralStatusText.Text = T($"Analiza trwa {minutes} min. Próbkowanie co 5 sekund.", $"Analysis runs for {minutes} min. Sampling every 5 seconds.");
+        StatusText.Text = T("●  ANALIZA OGÓLNA", "●  GENERAL ANALYSIS");
         StatusText.Foreground = (Brush)FindResource("Accent");
         _generalAnalysisTimer.Start();
 
@@ -290,7 +347,9 @@ public partial class MainWindow : Window
             GeneralProgress.Value = Math.Clamp(elapsedTime.TotalSeconds / _generalAnalysisDuration.TotalSeconds, 0, 1);
             var remaining = _generalAnalysisDuration - elapsedTime;
             var remainingText = remaining.TotalHours >= 1 ? remaining.ToString(@"h\:mm\:ss") : remaining.ToString(@"m\:ss");
-            GeneralStatusText.Text = $"Analiza trwa • pozostało {remainingText} • CPU {sample.System.Cpu?.ToString("0", CultureInfo.InvariantCulture) ?? "—"}% • RAM {sample.System.RamPercent}%";
+            GeneralStatusText.Text = T(
+                $"Analiza trwa • pozostało {remainingText} • CPU {sample.System.Cpu?.ToString("0", CultureInfo.InvariantCulture) ?? "—"}% • RAM {sample.System.RamPercent}%",
+                $"Analysis running • {remainingText} remaining • CPU {sample.System.Cpu?.ToString("0", CultureInfo.InvariantCulture) ?? "—"}% • RAM {sample.System.RamPercent}%");
 
             if (elapsedTime >= _generalAnalysisDuration)
                 CompleteGeneralAnalysis();
@@ -299,9 +358,11 @@ public partial class MainWindow : Window
         {
             _generalAnalysisTimer.Stop();
             _generalAnalysisRunning = false;
-            RenderGeneralReport("Analiza została przerwana, bo nie udało się odczytać danych systemowych:\n" + ex.Message);
-            GeneralStatusText.Text = "Nie udało się dokończyć analizy.";
-            StatusText.Text = "●  BŁĄD ANALIZY";
+            RenderGeneralReport(T(
+                "Analiza została przerwana, bo nie udało się odczytać danych systemowych:\n",
+                "The analysis stopped because system data could not be read:\n") + ex.Message);
+            GeneralStatusText.Text = T("Nie udało się dokończyć analizy.", "Could not complete the analysis.");
+            StatusText.Text = T("●  BŁĄD ANALIZY", "●  ANALYSIS ERROR");
             StatusText.Foreground = Brushes.Salmon;
             SetGeneralAnalysisControls(false);
         }
@@ -318,9 +379,11 @@ public partial class MainWindow : Window
         _generalAnalysisRunning = false;
         _generalAnalysisTimer.Stop();
         GeneralProgress.Value = Math.Clamp((DateTime.UtcNow - _generalAnalysisStartedAt).TotalSeconds / _generalAnalysisDuration.TotalSeconds, 0, 1);
-        RenderGeneralReport(BuildGeneralAnalysisReport(), true);
-        GeneralStatusText.Text = $"Analiza zakończona • {_generalSystemSamples.Count} próbek systemu • czas: {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min.";
-        StatusText.Text = "●  ANALIZA ZAKOŃCZONA";
+        RenderGeneralReport(BuildGeneralAnalysisReport());
+        GeneralStatusText.Text = T(
+            $"Analiza zakończona • {_generalSystemSamples.Count} próbek systemu • czas: {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min.",
+            $"Analysis complete • {_generalSystemSamples.Count} system samples • duration: {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min.");
+        StatusText.Text = T("●  ANALIZA ZAKOŃCZONA", "●  ANALYSIS COMPLETE");
         StatusText.Foreground = (Brush)FindResource("Accent");
         SetGeneralAnalysisControls(false);
     }
@@ -332,11 +395,12 @@ public partial class MainWindow : Window
         GeneralStopButton.IsEnabled = running && !_generalSampleBusy;
     }
 
-    private void RenderGeneralReport(string report, bool completed = false)
+    private void RenderGeneralReport(string report)
     {
-        _lastGeneralReport = completed ? report : "";
-        CopyGeneralReportButton.IsEnabled = completed;
-        ExportGeneralReportButton.IsEnabled = completed;
+        _lastGeneralReport = report;
+        var canExport = _generalSystemSamples.Count > 0 && !_generalAnalysisRunning;
+        CopyGeneralReportButton.IsEnabled = canExport;
+        ExportGeneralReportButton.IsEnabled = canExport;
         GeneralReportContent.Children.Clear();
         foreach (var line in report.Split('\n'))
         {
@@ -346,9 +410,10 @@ public partial class MainWindow : Window
                 continue;
             }
 
-            var isHeading = line.StartsWith("PODSUMOWANIE", StringComparison.Ordinal) ||
+            var isHeading = line.StartsWith(T("PODSUMOWANIE", "SUMMARY"), StringComparison.Ordinal) ||
                             line is "NAJWIĘKSZE UŻYCIE PAMIĘCI" or "NAJWIĘKSZE UŻYCIE CPU" or
-                                "PROGRAMY W TLE DO SPRAWDZENIA" or "WNIOSKI";
+                                "PROGRAMY W TLE DO SPRAWDZENIA" or "WNIOSKI" or
+                                "TOP MEMORY USAGE" or "TOP CPU USAGE" or "BACKGROUND PROCESSES TO REVIEW" or "CONCLUSIONS";
             var isBullet = line.StartsWith("• ", StringComparison.Ordinal);
             var text = new TextBlock
             {
@@ -366,54 +431,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void CopyGeneralReport(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
-            return;
-
-        try
-        {
-            Clipboard.SetText(_lastGeneralReport);
-            GeneralStatusText.Text = "Raport skopiowano do schowka.";
-        }
-        catch (System.Runtime.InteropServices.ExternalException ex)
-        {
-            MessageBox.Show(this, $"Nie udało się skopiować raportu:\n{ex.Message}",
-                "Błąd schowka", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void ExportGeneralReport(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
-            return;
-
-        var dialog = new SaveFileDialog
-        {
-            Title = "Zapisz raport Pulse",
-            FileName = $"Pulse-report-{DateTime.Now:yyyyMMdd-HHmm}.txt",
-            Filter = "Raport tekstowy (*.txt)|*.txt",
-            DefaultExt = ".txt",
-            AddExtension = true
-        };
-        if (dialog.ShowDialog(this) != true)
-            return;
-
-        try
-        {
-            File.WriteAllText(dialog.FileName, _lastGeneralReport);
-            GeneralStatusText.Text = $"Zapisano raport: {dialog.FileName}";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            MessageBox.Show(this, ex.Message, "Nie udało się zapisać raportu",
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
     private string BuildGeneralAnalysisReport()
     {
-        if (_generalSystemSamples.Count == 0) return "Nie zebrano żadnych próbek. Uruchom analizę ponownie.";
+        var english = _language == "en";
+        if (_generalSystemSamples.Count == 0)
+            return T("Nie zebrano żadnych próbek. Uruchom analizę ponownie.", "No samples were collected. Run the analysis again.");
 
         var cpuSamples = _generalSystemSamples.Where(x => x.Cpu.HasValue).Select(x => x.Cpu!.Value).ToArray();
         var averageCpu = cpuSamples.Length == 0 ? (double?)null : cpuSamples.Average();
@@ -427,41 +449,100 @@ public partial class MainWindow : Window
             .Take(5)
             .ToArray();
 
-        var lines = new List<string>
-        {
-            $"PODSUMOWANIE • {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min",
-            $"Średnie użycie RAM: {averageRam:0}% • maksimum: {peakRam}%.",
-            averageCpu is null ? "CPU: za mało próbek do wyliczenia średniej." : $"Średnie użycie CPU: {averageCpu:0}%."
-        };
+        var lines = english
+            ? new List<string>
+            {
+                $"SUMMARY • {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min",
+                $"Average memory usage: {averageRam:0}% • peak: {peakRam}%.",
+                averageCpu is null ? "CPU: not enough samples to calculate an average." : $"Average CPU usage: {averageCpu:0}%."
+            }
+            : new List<string>
+            {
+                $"PODSUMOWANIE • {(DateTime.UtcNow - _generalAnalysisStartedAt).TotalMinutes:0.0} min",
+                $"Średnie użycie RAM: {averageRam:0}% • maksimum: {peakRam}%.",
+                averageCpu is null ? "CPU: za mało próbek do wyliczenia średniej." : $"Średnie użycie CPU: {averageCpu:0}%."
+            };
 
         lines.Add("");
-        lines.Add("NAJWIĘKSZE UŻYCIE PAMIĘCI");
-        lines.Add("Średni zestaw roboczy podczas obserwacji:");
+        lines.Add(english ? "TOP MEMORY USAGE" : "NAJWIĘKSZE UŻYCIE PAMIĘCI");
+        lines.Add(english ? "Average working set during monitoring:" : "Średni zestaw roboczy podczas obserwacji:");
         lines.AddRange(topMemory.Length == 0
-            ? ["Nie udało się odczytać pamięci procesów."]
-            : topMemory.Select(x => $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageWorkingSetMb:0} MB, maksimum {x.PeakWorkingSetMb:0} MB."));
+            ? [english ? "Could not read process memory." : "Nie udało się odczytać pamięci procesów."]
+            : topMemory.Select(x => english
+                ? $"• {x.Name} (PID {x.Key.ProcessId}) — average {x.AverageWorkingSetMb:0} MB, peak {x.PeakWorkingSetMb:0} MB."
+                : $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageWorkingSetMb:0} MB, maksimum {x.PeakWorkingSetMb:0} MB."));
 
         lines.Add("");
-        lines.Add("NAJWIĘKSZE UŻYCIE CPU");
-        lines.Add("Średnie użycie całkowitej mocy procesora:");
+        lines.Add(english ? "TOP CPU USAGE" : "NAJWIĘKSZE UŻYCIE CPU");
+        lines.Add(english ? "Average share of total processor capacity:" : "Średnie użycie całkowitej mocy procesora:");
         lines.AddRange(topCpu.Length == 0
-            ? ["Za krótka analiza, aby porównać użycie CPU procesów."]
-            : topCpu.Select(x => $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageCpu:0.0}%, maksimum {x.PeakCpu:0.0}% całkowitej mocy CPU."));
+            ? [english ? "Analysis was too short to compare process CPU usage." : "Za krótka analiza, aby porównać użycie CPU procesów."]
+            : topCpu.Select(x => english
+                ? $"• {x.Name} (PID {x.Key.ProcessId}) — average {x.AverageCpu:0.0}%, peak {x.PeakCpu:0.0}% of total CPU capacity."
+                : $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageCpu:0.0}%, maksimum {x.PeakCpu:0.0}% całkowitej mocy CPU."));
 
         lines.Add("");
-        lines.Add("PROGRAMY W TLE DO SPRAWDZENIA");
+        lines.Add(english ? "BACKGROUND PROCESSES TO REVIEW" : "PROGRAMY W TLE DO SPRAWDZENIA");
         lines.AddRange(background.Length == 0
-            ? ["Nie wykryto procesu bez widocznego okna, który stale przekraczał progi pamięci/CPU."]
-            : background.Select(x => $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageWorkingSetMb:0} MB RAM i {x.AverageCpu:0.0}% CPU. Sprawdź, czy potrzebujesz go podczas pracy."));
+            ? [english ? "No process without a visible window consistently exceeded the memory/CPU thresholds." : "Nie wykryto procesu bez widocznego okna, który stale przekraczał progi pamięci/CPU."]
+            : background.Select(x => english
+                ? $"• {x.Name} (PID {x.Key.ProcessId}) — average {x.AverageWorkingSetMb:0} MB memory and {x.AverageCpu:0.0}% CPU. Check whether you need it."
+                : $"• {x.Name} (PID {x.Key.ProcessId}) — średnio {x.AverageWorkingSetMb:0} MB RAM i {x.AverageCpu:0.0}% CPU. Sprawdź, czy potrzebujesz go podczas pracy."));
 
         lines.Add("");
-        lines.Add("WNIOSKI");
-        if (averageRam >= 85) lines.Add("RAM był często mocno zajęty. Sprawdź wymienione aplikacje, karty przeglądarki i programy uruchomione w tle.");
-        else lines.Add("Średnie użycie RAM nie wskazuje na stały brak pamięci w trakcie tej obserwacji.");
-        if (averageCpu >= 75) lines.Add("CPU było średnio mocno obciążone; sprawdź procesy z najwyższego zestawienia i powtórz analizę przy typowym obciążeniu.");
-        else if (averageCpu is not null) lines.Add("Średnie użycie CPU nie wskazuje na stałe, wysokie obciążenie.");
-        lines.Add("To lista procesów zużywających zasoby, nie ocena, czy aplikacja jest zbędna. Nie zamykaj procesów Windows ani sterowników na podstawie samej nazwy; decyzję podejmij samodzielnie.");
+        lines.Add(english ? "CONCLUSIONS" : "WNIOSKI");
+        if (averageRam >= 85) lines.Add(english
+            ? "Memory was often heavily used. Review the listed apps, browser tabs, and background programs."
+            : "RAM był często mocno zajęty. Sprawdź wymienione aplikacje, karty przeglądarki i programy uruchomione w tle.");
+        else lines.Add(english
+            ? "Average memory usage does not indicate a persistent shortage during this observation."
+            : "Średnie użycie RAM nie wskazuje na stały brak pamięci w trakcie tej obserwacji.");
+        if (averageCpu >= 75) lines.Add(english
+            ? "CPU usage was high on average; review the top processes and repeat the analysis under typical load."
+            : "CPU było średnio mocno obciążone; sprawdź procesy z najwyższego zestawienia i powtórz analizę przy typowym obciążeniu.");
+        else if (averageCpu is not null) lines.Add(english
+            ? "Average CPU usage does not indicate consistently high load."
+            : "Średnie użycie CPU nie wskazuje na stałe, wysokie obciążenie.");
+        lines.Add(english
+            ? "This lists resource usage; it does not determine whether an app is unnecessary. Do not close Windows processes or drivers by name alone."
+            : "To lista procesów zużywających zasoby, nie ocena, czy aplikacja jest zbędna. Nie zamykaj procesów Windows ani sterowników na podstawie samej nazwy; decyzję podejmij samodzielnie.");
         return string.Join("\n", lines);
+    }
+
+    private void CopyGeneralReport(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
+            return;
+
+        Clipboard.SetText(_lastGeneralReport);
+        GeneralStatusText.Text = T("Raport skopiowano do schowka.", "Report copied to clipboard.");
+    }
+
+    private void ExportGeneralReport(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastGeneralReport))
+            return;
+
+        var dialog = new SaveFileDialog
+        {
+            Title = T("Zapisz raport Pulse", "Save Pulse report"),
+            FileName = $"Pulse-report-{DateTime.Now:yyyyMMdd-HHmm}.txt",
+            Filter = T("Raport tekstowy (*.txt)|*.txt", "Text report (*.txt)|*.txt"),
+            DefaultExt = ".txt",
+            AddExtension = true
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, _lastGeneralReport);
+            GeneralStatusText.Text = T("Zapisano raport: ", "Report saved: ") + dialog.FileName;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, T("Błąd", "Error"), MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private static GeneralAnalysisSample ReadGeneralAnalysisSample()
@@ -495,7 +576,7 @@ public partial class MainWindow : Window
     private async void ScanHardware(object sender, RoutedEventArgs e)
     {
         ScanButton.IsEnabled = false;
-        StatusText.Text = "●  SKANOWANIE";
+        StatusText.Text = T("●  SKANOWANIE", "●  SCANNING");
         StatusText.Foreground = (Brush)FindResource("Muted");
         try
         {
@@ -507,13 +588,13 @@ public partial class MainWindow : Window
             OverviewDiskValue.Text = string.Join("\n", info.Disks);
             OverviewAdviceText.Text = info.Advice;
             OverviewCompatibilityValue.Text = EvaluateCompatibility(info);
-            StatusText.Text = "●  GOTOWY";
+            StatusText.Text = T("●  GOTOWY", "●  READY");
             StatusText.Foreground = (Brush)FindResource("Accent");
         }
         catch (Exception ex)
         {
-            OverviewSystemValue.Text = "Nie udało się odczytać podzespołów: " + ex.Message;
-            StatusText.Text = "●  BŁĄD SKANU";
+            OverviewSystemValue.Text = T("Nie udało się odczytać podzespołów: ", "Could not read hardware: ") + ex.Message;
+            StatusText.Text = T("●  BŁĄD SKANU", "●  SCAN ERROR");
             StatusText.Foreground = Brushes.Salmon;
         }
         finally
@@ -686,38 +767,40 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         }
         if (_selectedGame is null)
             RestoreLastGame();
-        StatusText.Text = _games.Count > 0 ? $"●  GOTOWY · {_games.Count} OKIEN" : "●  GOTOWY";
+        StatusText.Text = _games.Count > 0
+            ? T($"●  GOTOWY · {_games.Count} OKIEN", $"●  READY · {_games.Count} WINDOWS")
+            : T("●  GOTOWY", "●  READY");
     }
 
     private void RestoreLastGame()
     {
-        if (string.IsNullOrWhiteSpace(_gamePreferences.LastGameName))
+        if (string.IsNullOrWhiteSpace(_preferences.LastGameName))
             return;
 
         _selectedGame = _games.FirstOrDefault(game =>
-            string.Equals(game.Name, _gamePreferences.LastGameName, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(game.Title, _gamePreferences.LastGameTitle, StringComparison.OrdinalIgnoreCase))
+            string.Equals(game.Name, _preferences.LastGameName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(game.Title, _preferences.LastGameTitle, StringComparison.OrdinalIgnoreCase))
             ?? _games.FirstOrDefault(game =>
-                string.Equals(game.Name, _gamePreferences.LastGameName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(game.Name, _preferences.LastGameName, StringComparison.OrdinalIgnoreCase));
         UpdateSelectedGame();
     }
 
     private void ChooseGame(object sender, RoutedEventArgs e)
     {
-        var picker = new GamePickerWindow(_games) { Owner = this };
+        var picker = new GamePickerWindow(_games, _language) { Owner = this };
         if (picker.ShowDialog() == true)
         {
             _selectedGame = picker.SelectedGame;
-            _gamePreferences.LastGameName = _selectedGame?.Name;
-            _gamePreferences.LastGameTitle = _selectedGame?.Title;
+            _preferences.LastGameName = _selectedGame?.Name;
+            _preferences.LastGameTitle = _selectedGame?.Title;
             try
             {
-                _gamePreferences.Save();
+                _preferences.Save();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
                 MessageBox.Show(this, $"Gra została wybrana, ale nie udało się jej zapamiętać:\n{ex.Message}",
-                    "Ustawienia gry", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    T("Ustawienia gry", "Game settings"), MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             UpdateSelectedGame();
         }
@@ -725,17 +808,22 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
 
     private void UpdateSelectedGame()
     {
-        SelectedGameTitle.Text = _selectedGame?.Title ?? "Nie wybrano gry";
+        SelectedGameTitle.Text = _selectedGame?.Title ?? T("Nie wybrano gry", "No game selected");
         SelectedGameDetails.Text = _selectedGame is null
-            ? "Wybierz aktywne okno gry, aby mierzyć użycie jej procesu."
+            ? T("Wybierz aktywne okno gry, aby mierzyć użycie jej procesu.", "Select an active game window to measure its process usage.")
             : $"Proces {_selectedGame.Name}  ·  PID {_selectedGame.ProcessId}";
+        if (_language == "en" && _selectedGame is not null)
+            SelectedGameDetails.Text = $"Process {_selectedGame.Name}  ·  PID {_selectedGame.ProcessId}";
     }
 
     private async void ToggleMonitor(object sender, RoutedEventArgs e)
     {
         if (_generalAnalysisRunning)
         {
-            MessageBox.Show(this, "Zakończ najpierw analizę ogólną, aby nie mieszać wyników obu analiz.", "Analiza już działa", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this,
+                T("Zakończ najpierw analizę ogólną, aby nie mieszać wyników obu analiz.",
+                    "Stop general analysis first so the two analyses do not overlap."),
+                T("Analiza już działa", "Analysis already running"), MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
         if (_timer.IsEnabled)
@@ -745,7 +833,10 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         }
         if (_selectedGame is null)
         {
-            MessageBox.Show(this, "Najpierw wybierz aktywne okno gry. Dzięki temu Pulse odczyta FPS właśnie z tej gry.", "Wybierz grę", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(this,
+                T("Najpierw wybierz aktywne okno gry. Dzięki temu Pulse odczyta FPS właśnie z tej gry.",
+                    "Select an active game window first so Pulse can read FPS from that game."),
+                T("Wybierz grę", "Choose a game"), MessageBoxButton.OK, MessageBoxImage.Information);
             ChooseGame(sender, e);
             if (_selectedGame is null) return;
         }
@@ -754,9 +845,9 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         SummaryPanel.Visibility = Visibility.Collapsed;
         SummaryText.Text = "";
         SetResultsVisibility(false, true);
-        MonitorButton.Content = "Przygotowuję pomiar…";
+        MonitorButton.Content = T("Przygotowuję pomiar…", "Preparing monitoring…");
         MonitorButton.IsEnabled = false;
-        StatusText.Text = "●  URUCHAMIAM POMIAR";
+        StatusText.Text = T("●  URUCHAMIAM POMIAR", "●  STARTING MONITORING");
         try
         {
             _hardwareSensors = await Task.Run(() => new HardwareSensors());
@@ -768,10 +859,10 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         StartFrameRateCapture();
         _processSamples.Clear();
         _timer.Start();
-        MonitorButton.Content = "■  Zakończ pomiar";
+        MonitorButton.Content = T("■  Zakończ pomiar", "■  Stop monitoring");
         MonitorButton.IsEnabled = true;
-        StatusText.Text = "●  POMIAR W TOKU";
-        FpsSubMetric.Text = "zbieram klatki…";
+        StatusText.Text = T("●  POMIAR W TOKU", "●  MONITORING");
+        FpsSubMetric.Text = T("zbieram klatki…", "collecting frames…");
         _ = SampleAsync();
     }
 
@@ -797,26 +888,26 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             if (s.Cpu is double systemCpu)
             {
                 _systemCpuSamples.Add(systemCpu);
-                CpuSystemMetric.Text = $"System  {systemCpu:0}%";
+                CpuSystemMetric.Text = $"{T("System", "System")}  {systemCpu:0}%";
             }
             if (telemetry.GameCpu is double processCpuValue)
             {
-                GameCpuMetric.Text = $"Gra  {processCpuValue:0.0}%";
+                GameCpuMetric.Text = $"{T("Gra", "Game")}  {processCpuValue:0.0}%";
                 _gameCpuSamples.Add(processCpuValue);
             }
-            else GameCpuMetric.Text = "Gra  —";
+            else GameCpuMetric.Text = T("Gra  —", "Game  —");
             if (telemetry.Sensors?.CpuCelsius is float cpuTemp)
             {
                 CpuTempMetric.Text = $"{cpuTemp:0}°C";
                 _cpuTemperatureSamples.Add(cpuTemp);
             }
-            else CpuTempMetric.Text = "n/d";
+            else CpuTempMetric.Text = T("n/d", "N/A");
             if (telemetry.Sensors?.GpuCelsius is float gpuTemp)
             {
                 GpuTempMetric.Text = $"{gpuTemp:0}°C";
                 _gpuTemperatureSamples.Add(gpuTemp);
             }
-            else GpuTempMetric.Text = "n/d";
+            else GpuTempMetric.Text = T("n/d", "N/A");
             if (telemetry.Frames.Count > 0) _frames.AddRange(telemetry.Frames);
             UpdateFrameMetrics();
             if (s.Cpu is double cpuValue) AddHistory(_cpuHistory, cpuValue);
@@ -827,7 +918,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         }
         catch (Exception ex)
         {
-            StatusText.Text = "●  BŁĄD POMIARU";
+            StatusText.Text = T("●  BŁĄD POMIARU", "●  MONITORING ERROR");
             PingMetric.ToolTip = ex.Message;
         }
         finally { _sampleBusy = false; }
@@ -840,7 +931,8 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         _captureError = null; _lastGpuBusyPercent = null;
         _processSamples.Clear();
         FpsMetric.Text = "—"; LowFpsMetric.Text = "—"; GpuBusyMetric.Text = "—";
-        CpuSystemMetric.Text = "System  —"; GameCpuMetric.Text = "Gra  —"; CpuTempMetric.Text = "n/d"; GpuTempMetric.Text = "n/d";
+        CpuSystemMetric.Text = T("System  —", "System  —"); GameCpuMetric.Text = T("Gra  —", "Game  —");
+        CpuTempMetric.Text = T("n/d", "N/A"); GpuTempMetric.Text = T("n/d", "N/A");
         PingMetric.Text = "—";
     }
 
@@ -848,8 +940,8 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
     {
         _timer.Stop();
         while (_sampleBusy) await Task.Delay(40);
-        MonitorButton.Content = "▶  Rozpocznij";
-        StatusText.Text = "●  TWORZĘ PODSUMOWANIE";
+        MonitorButton.Content = T("▶  Rozpocznij", "▶  Start monitoring");
+        StatusText.Text = T("●  TWORZĘ PODSUMOWANIE", "●  BUILDING SUMMARY");
         _frameRateCapture?.Stop();
         if (_frameRateCapture is not null) _frames.AddRange(_frameRateCapture.ReadNewSamples());
         _captureError = _frameRateCapture?.Error ?? _captureError;
@@ -859,8 +951,8 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         SummaryText.Text = BuildSummary();
         SetResultsVisibility(true, false);
         SummaryPanel.Visibility = Visibility.Visible;
-        SummaryHeading.Text = $"WYNIK SESJI  ·  {DateTime.Now:HH:mm}";
-        StatusText.Text = "●  POMIAR ZAKOŃCZONY";
+        SummaryHeading.Text = $"{T("WYNIK SESJI", "SESSION RESULTS")}  ·  {DateTime.Now:HH:mm}";
+        StatusText.Text = T("●  POMIAR ZAKOŃCZONY", "●  MONITORING COMPLETE");
         StatusText.Foreground = (Brush)FindResource("Accent");
         _frameRateCapture?.Dispose();
         _frameRateCapture = null;
@@ -871,17 +963,26 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         ResultsPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
         ChartPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
         AwaitingResultsPanel.Visibility = showResults ? Visibility.Collapsed : Visibility.Visible;
+        SetAwaitingText(measuring);
+    }
+
+    private void SetAwaitingText(bool measuring)
+    {
         if (measuring)
         {
-            AwaitingEyebrow.Text = "POMIAR W TOKU";
-            AwaitingTitle.Text = "Zbieram dane z gry";
-            AwaitingSubtitle.Text = "Graj normalnie i odtwórz spadki FPS. Po kliknięciu „Zakończ pomiar” pokażę wyniki i ocenę sesji.";
+            AwaitingEyebrow.Text = T("POMIAR W TOKU", "MONITORING");
+            AwaitingTitle.Text = T("Zbieram dane z gry", "Collecting game data");
+            AwaitingSubtitle.Text = T(
+                "Graj normalnie i odtwórz spadki FPS. Po kliknięciu „Zakończ pomiar” pokażę wyniki i ocenę sesji.",
+                "Play normally and reproduce the FPS drops. Click “Stop monitoring” to see the results and session assessment.");
         }
         else
         {
-            AwaitingEyebrow.Text = "GOTOWE DO ANALIZY";
-            AwaitingTitle.Text = "Wyniki pojawią się po pomiarze";
-            AwaitingSubtitle.Text = "Wybierz grę, kliknij rozpocznij i graj chwilę. Po zakończeniu Pulse pokaże pełne podsumowanie.";
+            AwaitingEyebrow.Text = T("GOTOWE DO ANALIZY", "READY TO ANALYZE");
+            AwaitingTitle.Text = T("Wyniki pojawią się po pomiarze", "Results will appear after monitoring");
+            AwaitingSubtitle.Text = T(
+                "Wybierz grę, kliknij rozpocznij i graj chwilę. Po zakończeniu Pulse pokaże pełne podsumowanie.",
+                "Choose a game, start monitoring, and play for a while. Pulse will show a summary when you finish.");
         }
     }
 
@@ -900,7 +1001,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             Grid.SetRow(ChartPanel, 0);
             Grid.SetRowSpan(ChartPanel, 4);
             ChartPanel.Height = Math.Max(500, MonitorPage.ViewportHeight - 24);
-            ChartExpandButton.Content = "⛶  Zmniejsz";
+            ChartExpandButton.Content = T("⛶  Zmniejsz", "⛶  Collapse");
             _chartExpanded = true;
         }
         else
@@ -912,7 +1013,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             ResultsPanel.Visibility = _resultsPanelVisibility;
             SummaryPanel.Visibility = _summaryPanelVisibility;
             AwaitingResultsPanel.Visibility = _awaitingResultsPanelVisibility;
-            ChartExpandButton.Content = "⛶  Powiększ";
+            ChartExpandButton.Content = T("⛶  Powiększ", "⛶  Expand");
             _chartExpanded = false;
         }
         MonitorContent.UpdateLayout();
@@ -928,7 +1029,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             FpsSubMetric.ToolTip = _captureError;
             PingMetric.ToolTip = _captureError;
             FpsSubMetric.Text = _captureError
-                ?? "czekam na klatki z gry…";
+                ?? T("czekam na klatki z gry…", "waiting for game frames…");
             return;
         }
         var ordered = PrimaryFrames().OrderBy(x => x.TimestampMs).ToArray();
@@ -940,65 +1041,105 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         FpsMetric.Text = $"{currentFps:0}";
         var slowCount = Math.Max(1, (int)Math.Ceiling(ordered.Length * .01));
         LowFpsMetric.Text = ordered.Length < 100 ? "…" : $"{1000d / ordered.Select(x => x.FrameTimeMs).OrderByDescending(x => x).Take(slowCount).Average():0}";
-        FpsSubMetric.Text = $"średnia sesji {average:0} FPS";
+        FpsSubMetric.Text = T($"średnia sesji {average:0} FPS", $"session average {average:0} FPS");
         var gpuRows = ordered.Where(x => x.GpuBusyMs is not null).ToArray();
         var gpuPct = gpuRows.Length == 0 ? (double?)null : gpuRows.Average(x => Math.Clamp(x.GpuBusyMs!.Value / x.FrameTimeMs * 100, 0, 100));
         _lastGpuBusyPercent = gpuPct;
-        GpuBusyMetric.Text = gpuPct is null ? "n/d" : $"{gpuPct:0}%";
+        GpuBusyMetric.Text = gpuPct is null ? T("n/d", "N/A") : $"{gpuPct:0}%";
     }
 
     private string BuildSummary()
     {
         var duration = DateTime.Now - _sessionStarted;
-        var lines = new List<string> { $"Gra: {_selectedGame?.Title ?? "brak"}  ·  czas: {duration:mm\\:ss}" };
+        var lines = new List<string>
+        {
+            T($"Gra: {_selectedGame?.Title ?? "brak"}  ·  czas: {duration:mm\\:ss}",
+                $"Game: {_selectedGame?.Title ?? "none"}  ·  duration: {duration:mm\\:ss}")
+        };
         var measuredFrames = PrimaryFrames();
         var averageFps = measuredFrames.Count == 0 ? 0 : 1000d / measuredFrames.Average(x => x.FrameTimeMs);
         if (measuredFrames.Count == 0)
         {
-            lines.Add("FPS: brak danych. Gra mogła nie renderować obrazu w trakcie sesji albo system zablokował przechwytywanie klatek.");
-            if (!string.IsNullOrWhiteSpace(_captureError)) lines.Add("Licznik FPS: " + _captureError);
+            lines.Add(T(
+                "FPS: brak danych. Gra mogła nie renderować obrazu w trakcie sesji albo system zablokował przechwytywanie klatek.",
+                "FPS: no data. The game may not have rendered during the session, or Windows blocked frame capture."));
+            if (!string.IsNullOrWhiteSpace(_captureError))
+                lines.Add(T("Licznik FPS: ", "Frame capture: ") + _captureError);
         }
         else
         {
             var sorted = measuredFrames.OrderBy(x => x.TimestampMs).ToArray();
-            lines.Add($"FPS: średnio {averageFps:0}. Zapisano {sorted.Length:N0} klatek z głównego obrazu gry.");
+            lines.Add(T($"FPS: średnio {averageFps:0}. Zapisano {sorted.Length:N0} klatek z głównego obrazu gry.",
+                $"FPS: {averageFps:0} average. Captured {sorted.Length:N0} frames from the game's main window."));
             if (sorted.Length >= 100)
             {
                 var lowCount = Math.Max(1, (int)Math.Ceiling(sorted.Length * .01));
                 var low = 1000d / sorted.Select(x => x.FrameTimeMs).OrderByDescending(x => x).Take(lowCount).Average();
-                lines.Add($"1% low: {low:0} FPS — wynik dla najwolniejszego 1% klatek.");
+                lines.Add(T($"1% low: {low:0} FPS — wynik dla najwolniejszego 1% klatek.",
+                    $"1% low: {low:0} FPS — the slowest 1% of frames."));
             }
-            else lines.Add("1% low: próbka była za krótka (mniej niż 100 klatek).");
+            else lines.Add(T("1% low: próbka była za krótka (mniej niż 100 klatek).",
+                "1% low: sample was too short (fewer than 100 frames)."));
         }
-        if (_gameCpuSamples.Count > 0) lines.Add($"CPU gry: średnio {_gameCpuSamples.Average():0}% całkowitej mocy procesora.");
-        if (_systemCpuSamples.Count > 0) lines.Add($"CPU systemu: średnio {_systemCpuSamples.Average():0}%.");
-        if (_lastGpuBusyPercent is double gpuBusy) lines.Add($"Aktywność GPU na klatkach: około {gpuBusy:0}% czasu klatki.");
-        if (_cpuTemperatureSamples.Count > 0) lines.Add($"Temperatura CPU: maks. {_cpuTemperatureSamples.Max():0}°C.");
-        else lines.Add("Temperatura CPU: brak sensora dostępnego dla tego sprzętu.");
-        if (_gpuTemperatureSamples.Count > 0) lines.Add($"Temperatura GPU: maks. {_gpuTemperatureSamples.Max():0}°C.");
-        else lines.Add("Temperatura GPU: brak sensora dostępnego dla tego sprzętu.");
-        if (_ramSamples.Count > 0) lines.Add($"RAM: maksymalne zajęcie {_ramSamples.Max():0}%.");
-        if (_pingSamples.Count > 0) lines.Add($"Ping do {PingHost.Text.Trim()}: średnio {_pingSamples.Average():0} ms, maks. {_pingSamples.Max()} ms.");
+        if (_gameCpuSamples.Count > 0)
+            lines.Add(T($"CPU gry: średnio {_gameCpuSamples.Average():0}% całkowitej mocy procesora.",
+                $"Game CPU: {_gameCpuSamples.Average():0}% average of total processor capacity."));
+        if (_systemCpuSamples.Count > 0)
+            lines.Add(T($"CPU systemu: średnio {_systemCpuSamples.Average():0}%.",
+                $"System CPU: {_systemCpuSamples.Average():0}% average."));
+        if (_lastGpuBusyPercent is double gpuBusy)
+            lines.Add(T($"Aktywność GPU na klatkach: około {gpuBusy:0}% czasu klatki.",
+                $"GPU busy: about {gpuBusy:0}% of frame time."));
+        if (_cpuTemperatureSamples.Count > 0)
+            lines.Add(T($"Temperatura CPU: maks. {_cpuTemperatureSamples.Max():0}°C.",
+                $"CPU temperature: { _cpuTemperatureSamples.Max():0}°C maximum."));
+        else lines.Add(T("Temperatura CPU: brak sensora dostępnego dla tego sprzętu.",
+            "CPU temperature: no sensor is available for this hardware."));
+        if (_gpuTemperatureSamples.Count > 0)
+            lines.Add(T($"Temperatura GPU: maks. {_gpuTemperatureSamples.Max():0}°C.",
+                $"GPU temperature: { _gpuTemperatureSamples.Max():0}°C maximum."));
+        else lines.Add(T("Temperatura GPU: brak sensora dostępnego dla tego sprzętu.",
+            "GPU temperature: no sensor is available for this hardware."));
+        if (_ramSamples.Count > 0)
+            lines.Add(T($"RAM: maksymalne zajęcie {_ramSamples.Max():0}%.",
+                $"Memory: maximum use was {_ramSamples.Max():0}%."));
+        if (_pingSamples.Count > 0)
+            lines.Add(T($"Ping do {PingHost.Text.Trim()}: średnio {_pingSamples.Average():0} ms, maks. {_pingSamples.Max()} ms.",
+                $"Ping to {PingHost.Text.Trim()}: {_pingSamples.Average():0} ms average, {_pingSamples.Max()} ms maximum."));
 
         var observations = new List<string>();
         if (measuredFrames.Count > 30)
         {
-            if (averageFps < 30) observations.Add("Średni FPS był niski dla większości gier.");
+            if (averageFps < 30) observations.Add(T("Średni FPS był niski dla większości gier.",
+                "Average FPS was low for most games."));
             if (measuredFrames.Count >= 100)
             {
                 var low = 1000d / measuredFrames.Select(x => x.FrameTimeMs).OrderByDescending(x => x).Take(Math.Max(1, (int)Math.Ceiling(measuredFrames.Count * .01))).Average();
-                if (low < averageFps * .65) observations.Add("1% low mocno odbiega od średniej — w pomiarze pojawiały się nierówne klatki.");
-                if (averageFps >= 50 && low >= averageFps * .75) observations.Add("FPS były dość równe w trakcie tej sesji.");
+                if (low < averageFps * .65) observations.Add(T(
+                    "1% low mocno odbiega od średniej — w pomiarze pojawiały się nierówne klatki.",
+                    "1% low was far below average, indicating uneven frame delivery."));
+                if (averageFps >= 50 && low >= averageFps * .75) observations.Add(T(
+                    "FPS były dość równe w trakcie tej sesji.",
+                    "FPS were relatively consistent during this session."));
             }
         }
-        if (_cpuTemperatureSamples.Count > 0 && _cpuTemperatureSamples.Max() >= 90) observations.Add("CPU osiągnął co najmniej 90°C. Sprawdź limit temperatury konkretnego modelu i chłodzenie.");
-        if (_gpuTemperatureSamples.Count > 0 && _gpuTemperatureSamples.Max() >= 85) observations.Add("GPU osiągnęło co najmniej 85°C. Sprawdź specyfikację karty i przepływ powietrza.");
-        if (_ramSamples.Count > 0 && _ramSamples.Max() >= 90) observations.Add("RAM był prawie pełny — zamknij zbędne programy i sprawdź, czy przycięcia się zmniejszą.");
-        if (observations.Count == 0) observations.Add("W zebranych danych nie widać wyraźnego sygnału problemu. Wynik dotyczy tylko tej gry i tej sesji.");
+        if (_cpuTemperatureSamples.Count > 0 && _cpuTemperatureSamples.Max() >= 90) observations.Add(T(
+            "CPU osiągnął co najmniej 90°C. Sprawdź limit temperatury konkretnego modelu i chłodzenie.",
+            "CPU reached at least 90°C. Check the processor's temperature limit and cooling."));
+        if (_gpuTemperatureSamples.Count > 0 && _gpuTemperatureSamples.Max() >= 85) observations.Add(T(
+            "GPU osiągnęło co najmniej 85°C. Sprawdź specyfikację karty i przepływ powietrza.",
+            "GPU reached at least 85°C. Check the graphics card specifications and airflow."));
+        if (_ramSamples.Count > 0 && _ramSamples.Max() >= 90) observations.Add(T(
+            "RAM był prawie pełny — zamknij zbędne programy i sprawdź, czy przycięcia się zmniejszą.",
+            "Memory was nearly full — close unnecessary programs and check whether stuttering improves."));
+        if (observations.Count == 0) observations.Add(T(
+            "W zebranych danych nie widać wyraźnego sygnału problemu. Wynik dotyczy tylko tej gry i tej sesji.",
+            "The collected data shows no clear sign of an issue. This result applies only to this game and session."));
         lines.Add("");
-        lines.Add("OCENA POMIARU");
+        lines.Add(T("OCENA POMIARU", "SESSION ASSESSMENT"));
         lines.AddRange(observations.Select(x => "•  " + x));
-        lines.Add("To wskazówki, nie pewna diagnoza. FPS zależy też od gry, ustawień i odświeżania monitora.");
+        lines.Add(T("To wskazówki, nie pewna diagnoza. FPS zależy też od gry, ustawień i odświeżania monitora.",
+            "These are observations, not a definitive diagnosis. FPS also depends on the game, settings, and display refresh rate."));
         return string.Join("\n", lines);
     }
 
@@ -1009,7 +1150,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         _frameRateCapture?.Dispose();
         _frameRateCapture = new FrameRateCapture(_selectedGame!.ProcessId);
         _captureError = _frameRateCapture.Error;
-        FpsSubMetric.Text = _captureError ?? "uruchamiam licznik klatek…";
+        FpsSubMetric.Text = _captureError ?? T("uruchamiam licznik klatek…", "starting frame capture…");
         FpsSubMetric.ToolTip = _captureError;
         PingMetric.ToolTip = _captureError;
     }
@@ -1032,9 +1173,9 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
                 PingMetric.Text = $"{result.RoundtripTime} ms";
                 _pingSamples.Add(result.RoundtripTime);
             }
-            else PingMetric.Text = "brak odpowiedzi";
+            else PingMetric.Text = T("brak odpowiedzi", "no response");
         }
-        catch { PingMetric.Text = "błąd hosta"; }
+        catch { PingMetric.Text = T("błąd hosta", "host error"); }
     }
 
     private static void AddHistory(Queue<double> values, double value)
@@ -1062,9 +1203,9 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         Plot(_ramHistory, new SolidColorBrush(Color.FromRgb(72, 184, 255)), left, w - right, top, plotH);
         var sampleCount = Math.Max(_cpuHistory.Count, _ramHistory.Count);
         var oldestSeconds = Math.Max(0, sampleCount - 1) * _timer.Interval.TotalSeconds;
-        var oldest = new TextBlock { Text = $"{oldestSeconds:0}s temu", Foreground = (Brush)FindResource("Muted"), FontSize = 9 };
+        var oldest = new TextBlock { Text = T($"{oldestSeconds:0}s temu", $"{oldestSeconds:0}s ago"), Foreground = (Brush)FindResource("Muted"), FontSize = 9 };
         Canvas.SetLeft(oldest, left); Canvas.SetTop(oldest, h - 17); ChartCanvas.Children.Add(oldest);
-        var newest = new TextBlock { Text = "teraz", Foreground = (Brush)FindResource("Muted"), FontSize = 9 };
+        var newest = new TextBlock { Text = T("teraz", "now"), Foreground = (Brush)FindResource("Muted"), FontSize = 9 };
         Canvas.SetLeft(newest, w - right - 28); Canvas.SetTop(newest, h - 17); ChartCanvas.Children.Add(newest);
     }
 
@@ -1090,15 +1231,15 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
     private async void TestPing(object sender, RoutedEventArgs e)
     {
         var host = PingHost.Text.Trim();
-        if (string.IsNullOrWhiteSpace(host)) { PingMetric.Text = "Wpisz host"; return; }
+        if (string.IsNullOrWhiteSpace(host)) { PingMetric.Text = T("Wpisz host", "Enter a host"); return; }
         PingMetric.Text = "…";
         try
         {
             using var ping = new Ping();
             var result = await ping.SendPingAsync(host, 1800);
-            PingMetric.Text = result.Status == IPStatus.Success ? $"{result.RoundtripTime} ms" : "Brak odpowiedzi";
+            PingMetric.Text = result.Status == IPStatus.Success ? $"{result.RoundtripTime} ms" : T("Brak odpowiedzi", "No response");
         }
-        catch { PingMetric.Text = "Błąd hosta"; }
+        catch { PingMetric.Text = T("Błąd hosta", "Host error"); }
     }
 
     private void ChartSizeChanged(object sender, SizeChangedEventArgs e) => DrawChart();

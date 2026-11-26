@@ -10,6 +10,7 @@ public sealed class GamePreferences
         "Pulse",
         "game.json");
 
+    public string Language { get; set; } = "pl";
     public string? LastGameName { get; set; }
     public string? LastGameTitle { get; set; }
 

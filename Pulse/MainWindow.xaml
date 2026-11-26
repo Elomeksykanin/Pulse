@@ -70,16 +70,25 @@
           <Button x:Name="NavGeneral" Style="{StaticResource NavButton}" Content="◉  Analiza ogólna" Click="ShowGeneralAnalysis"/>
           <TextBlock Text="ANALIZA GRY" Foreground="{StaticResource Muted}" FontSize="9" FontWeight="Bold" Margin="8,22,0,4"/>
           <Button x:Name="NavMonitor" Style="{StaticResource NavButton}" Content="◫  Pomiar i wyniki" Click="ShowMonitor"/>
+          <TextBlock Text="KATEGORIE • WKRÓTCE" Foreground="{StaticResource Muted}" FontSize="9" FontWeight="Bold" Margin="8,22,0,4"/>
+          <Button Style="{StaticResource NavButton}" Content="FPS i stabilność • Wkrótce" IsEnabled="False"/>
+          <Button Style="{StaticResource NavButton}" Content="Bateria i energia • Wkrótce" IsEnabled="False"/>
+          <Button Style="{StaticResource NavButton}" Content="Sieć i opóźnienia • Wkrótce" IsEnabled="False"/>
         </StackPanel>
         <StackPanel DockPanel.Dock="Bottom" Margin="4,0,4,0">
           <Border Height="1" Background="{StaticResource Edge}" Margin="0,0,0,15"/>
           <TextBlock Text="TRYB PRYWATNY" Foreground="{StaticResource Accent}" FontSize="9" FontWeight="Bold"/>
           <TextBlock Text="Dane są odczytywane lokalnie z komputera." Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0"/>
+          <TextBlock Text="Język / Language" Foreground="{StaticResource Muted}" FontSize="9" FontWeight="Bold" Margin="0,14,0,5"/>
+          <ComboBox x:Name="LanguageSelector" Height="32" SelectedValuePath="Tag" SelectionChanged="LanguageChanged">
+            <ComboBoxItem Content="Polski" Tag="pl"/>
+            <ComboBoxItem Content="English" Tag="en"/>
+          </ComboBox>
           <Border Background="#151D33" BorderBrush="{StaticResource Edge}" BorderThickness="1" CornerRadius="10" Margin="0,16,0,0" Padding="11,9">
             <Grid>
               <StackPanel>
                 <TextBlock Text="Pulse" Foreground="{StaticResource Ink}" FontSize="11" FontWeight="SemiBold"/>
-                <TextBlock x:Name="AppVersionText" Text="Wersja Beta 0.1.7" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0"/>
+                <TextBlock x:Name="AppVersionText" Text="Wersja Beta 0.1.8" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0"/>
               </StackPanel>
               <Ellipse Width="7" Height="7" Fill="#4ADE80" HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>

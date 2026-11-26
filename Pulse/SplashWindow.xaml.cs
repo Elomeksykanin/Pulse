@@ -6,11 +6,17 @@ namespace Pulse;
 
 public partial class SplashWindow : Window
 {
-    public SplashWindow()
+    private readonly string _language;
+
+    public SplashWindow(string language)
     {
         InitializeComponent();
+        _language = language;
+        UiLanguage.Apply(this, _language);
         var version = typeof(SplashWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-        VersionLabel.Text = $"UWAGA  •  WERSJA BETA {version}";
+        VersionLabel.Text = _language == "en"
+            ? $"NOTE  •  BETA VERSION {version}"
+            : $"UWAGA  •  WERSJA BETA {version}";
     }
 
     public event EventHandler? EnterRequested;
@@ -18,7 +24,7 @@ public partial class SplashWindow : Window
     private async void EnterApp(object sender, RoutedEventArgs e)
     {
         EnterButton.IsEnabled = false;
-        EnterButton.Content = "Uruchamiam…";
+        EnterButton.Content = UiLanguage.Get("Uruchamiam…", _language);
         EnterRequested?.Invoke(this, EventArgs.Empty);
 
         var duration = TimeSpan.FromMilliseconds(420);

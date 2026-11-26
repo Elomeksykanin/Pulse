@@ -1,9 +1,11 @@
-# Pulse 0.1.7
+# Pulse 0.1.8
 
 ## Polski
-- Raport analizy ogólnej można teraz kopiować do schowka lub zapisać jako plik TXT.
-- Pulse zapamiętuje ostatnio wybraną grę i przywraca ją przy kolejnym uruchomieniu.
+- Dodano wybór języka interfejsu: polski lub angielski; wybór jest zapamiętywany.
+- Dodano zapowiedzi kolejnych kategorii diagnostycznych: FPS i stabilność, bateria i energia oraz sieć i opóźnienia.
+- Ekran startowy i okno wyboru gry obsługują wybrany język.
 
 ## English
-- General analysis reports can now be copied to the clipboard or saved as TXT files.
-- Pulse remembers the last selected game and restores it on the next launch.
+- Added a Polish/English interface language selector that remembers your choice.
+- Added previews for upcoming diagnostic categories: FPS and stability, battery and power, and network and latency.
+- The splash screen and game picker follow the selected language.

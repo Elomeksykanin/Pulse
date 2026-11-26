@@ -62,7 +62,7 @@
           <StackPanel>
             <TextBlock Text="DOSTĘPNA WERSJA" Foreground="{StaticResource Accent}"
                        FontSize="9" FontWeight="Bold"/>
-            <TextBlock x:Name="VersionText" Text="0.1.7" FontSize="21" FontWeight="SemiBold"
+            <TextBlock x:Name="VersionText" Text="0.1.8" FontSize="21" FontWeight="SemiBold"
                        Margin="0,4,0,0"/>
           </StackPanel>
         </Border>
