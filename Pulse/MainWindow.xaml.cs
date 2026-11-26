@@ -56,7 +56,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.2"}";
+        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.3"}";
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();

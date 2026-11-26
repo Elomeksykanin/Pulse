@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Pulse</AssemblyName>
     <RootNamespace>Pulse</RootNamespace>
-    <Version>0.1.2</Version>
+    <Version>0.1.3</Version>
     <StartupObject>Pulse.App</StartupObject>
   </PropertyGroup>
   <ItemGroup>

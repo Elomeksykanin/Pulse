@@ -31,7 +31,7 @@
         <TextBlock Text="BY ELOMEKSYKANIN" Foreground="#C4B5FD" FontFamily="Segoe UI" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center"/>
         <Border Background="#332D2318" BorderBrush="#806B4B" BorderThickness="1" CornerRadius="8" Padding="14,8" Margin="0,12,0,0">
           <StackPanel HorizontalAlignment="Center">
-            <TextBlock Text="UWAGA  •  WERSJA BETA 0.1.2" Foreground="#FFD28A" FontFamily="Segoe UI" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center"/>
+            <TextBlock Text="UWAGA  •  WERSJA BETA 0.1.3" Foreground="#FFD28A" FontFamily="Segoe UI" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center"/>
             <TextBlock Text="Aplikacja jest w fazie testów." Foreground="#D8C6A7" FontFamily="Segoe UI" FontSize="10" HorizontalAlignment="Center" Margin="0,3,0,0"/>
           </StackPanel>
         </Border>
