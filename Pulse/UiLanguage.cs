@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Media.Media3D;
 
 namespace Pulse;
 
@@ -163,12 +164,33 @@ public static class UiLanguage
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        var visited = new HashSet<DependencyObject>();
+        var pending = new Stack<DependencyObject>();
+        AddChildren(root);
+
+        while (pending.Count > 0)
         {
-            var child = VisualTreeHelper.GetChild(root, i);
+            var child = pending.Pop();
+            if (!visited.Add(child))
+                continue;
+
             yield return child;
-            foreach (var descendant in Descendants(child))
-                yield return descendant;
+            AddChildren(child);
+        }
+
+        void AddChildren(DependencyObject parent)
+        {
+            foreach (var logicalChild in LogicalTreeHelper.GetChildren(parent))
+            {
+                if (logicalChild is DependencyObject dependencyObject)
+                    pending.Push(dependencyObject);
+            }
+
+            if (parent is not Visual && parent is not Visual3D)
+                return;
+
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+                pending.Push(VisualTreeHelper.GetChild(parent, i));
         }
     }
 }

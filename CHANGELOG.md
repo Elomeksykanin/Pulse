@@ -1,3 +1,13 @@
+# Pulse 0.1.9
+
+## Polski
+- Naprawiono stosowanie wybranego języka na głównym ekranie po wyborze języka na ekranie startowym.
+- Przełączanie języka działa również przed pełnym załadowaniem okna.
+
+## English
+- Fixed applying the language selected on the startup screen to the main application window.
+- Language switching now also works before the window has fully loaded.
+
 # Pulse 0.1.8
 
 ## Polski
