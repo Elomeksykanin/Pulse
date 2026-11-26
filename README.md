@@ -16,6 +16,12 @@ Kompilacja wersji Release:
 dotnet build .\Pulse\Pulse.csproj -c Release
 ```
 
+## Instalowanie i aktualizacje
+
+Instalator oraz aktualizacje są publikowane jako GitHub Releases. Pulse sprawdza aktualizacje przy uruchomieniu, a po zgodzie pobiera je i uruchamia ponownie aplikację. Automatyczne aktualizacje działają dla wersji zainstalowanej instalatorem Velopack; uruchomienie skopiowanego pliku EXE nie wystarcza.
+
+Nowe wydanie tworzy się przez workflow **Release** na karcie **Actions**, podając wersję w formacie `X.Y.Z` (np. `0.1.3`), albo przez wypchnięcie tagu `vX.Y.Z`. Workflow buduje instalator i publikuje pliki aktualizacji. Zwiększ wersję w `Pulse/Pulse.csproj` przed kolejnym wydaniem.
+
 ## Co mierzy
 
 - Skan sprzętu przez Windows CIM: system, procesor, RAM, karty graficzne, sterowniki i dyski.

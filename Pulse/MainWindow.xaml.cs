@@ -11,11 +11,14 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using Velopack;
+using Velopack.Sources;
 
 namespace Pulse;
 
 public partial class MainWindow : Window
 {
+    private readonly UpdateManager _updateManager = new(new GithubSource("https://github.com/Elomeksykanin/Pulse", null, false, null));
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _generalAnalysisTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly Queue<double> _cpuHistory = new();
@@ -38,6 +41,7 @@ public partial class MainWindow : Window
     private bool _sampleBusy;
     private bool _generalSampleBusy;
     private bool _generalAnalysisRunning;
+    private bool _updateCheckRunning;
     private DateTime _generalAnalysisStartedAt;
     private TimeSpan _generalAnalysisDuration;
     private double? _lastGpuBusyPercent;
@@ -52,11 +56,13 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppVersionText.Text = $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.2"}";
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();
         _generalAnalysisTimer.Tick += async (_, _) => await SampleGeneralAnalysis();
         Loaded += (_, _) => RefreshGames(null, null);
+        Loaded += async (_, _) => await CheckForUpdatesAsync(false);
         Closing += (_, _) =>
         {
             _timer.Stop();
@@ -64,6 +70,79 @@ public partial class MainWindow : Window
             _frameRateCapture?.Dispose();
             try { _hardwareSensors?.Dispose(); } catch { }
         };
+    }
+
+    private async void CheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        await CheckForUpdatesAsync(true);
+    }
+
+    private async Task CheckForUpdatesAsync(bool userInitiated)
+    {
+        if (_updateCheckRunning)
+            return;
+
+        if (!_updateManager.IsInstalled)
+        {
+            if (userInitiated)
+            {
+                var result = MessageBox.Show(
+                    this,
+                    "Automatyczne aktualizacje działają po zainstalowaniu Pulse. Otworzyć stronę wydań, aby pobrać instalator?",
+                    "Zainstaluj Pulse",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (result == MessageBoxResult.Yes)
+                    Process.Start(new ProcessStartInfo("https://github.com/Elomeksykanin/Pulse/releases/latest") { UseShellExecute = true });
+            }
+            return;
+        }
+
+        _updateCheckRunning = true;
+        UpdateButton.IsEnabled = false;
+        try
+        {
+            StatusText.Text = "●  SPRAWDZAM AKTUALIZACJE";
+            var update = await _updateManager.CheckForUpdatesAsync();
+            if (update is null)
+            {
+                StatusText.Text = "●  APLIKACJA JEST AKTUALNA";
+                if (userInitiated)
+                    MessageBox.Show(this, "Masz najnowszą wersję Pulse.", "Aktualizacje", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var version = update.TargetFullRelease.Version;
+            var result = MessageBox.Show(
+                this,
+                $"Dostępna jest wersja {version}. Pobrać aktualizację i uruchomić Pulse ponownie?",
+                "Aktualizacja Pulse",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+            if (result != MessageBoxResult.Yes)
+            {
+                StatusText.Text = "●  DOSTĘPNA AKTUALIZACJA";
+                return;
+            }
+
+            StatusText.Text = "●  POBIERAM AKTUALIZACJĘ";
+            await _updateManager.DownloadUpdatesAsync(update, percent =>
+                Dispatcher.InvokeAsync(() => StatusText.Text = $"●  POBIERAM AKTUALIZACJĘ {percent}%"));
+            StatusText.Text = "●  PONOWNIE URUCHAMIAM";
+            _updateManager.ApplyUpdatesAndRestart(update.TargetFullRelease);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = "●  NIE UDAŁO SIĘ SPRAWDZIĆ AKTUALIZACJI";
+            if (userInitiated)
+                MessageBox.Show(this, $"Nie udało się sprawdzić lub zainstalować aktualizacji:\n{ex.Message}", "Błąd aktualizacji", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _updateCheckRunning = false;
+            UpdateButton.IsEnabled = true;
+        }
     }
 
     private void ShowOverview(object sender, RoutedEventArgs e)

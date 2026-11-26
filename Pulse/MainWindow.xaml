@@ -79,7 +79,7 @@
             <Grid>
               <StackPanel>
                 <TextBlock Text="Pulse" Foreground="{StaticResource Ink}" FontSize="11" FontWeight="SemiBold"/>
-                <TextBlock Text="Wersja Beta 0.1.2" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0"/>
+                <TextBlock x:Name="AppVersionText" Text="Wersja Beta 0.1.2" Foreground="{StaticResource Muted}" FontSize="9" Margin="0,3,0,0"/>
               </StackPanel>
               <Ellipse Width="7" Height="7" Fill="#4ADE80" HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>
@@ -94,9 +94,12 @@
           <TextBlock Text="Diagnostyka wydajności" FontSize="27" FontWeight="Bold"/>
           <TextBlock Text="Zbierz dane, zanim zdecydujesz o wymianie części." Foreground="{StaticResource Muted}" FontSize="12" Margin="0,5,0,0"/>
         </StackPanel>
-        <Border HorizontalAlignment="Right" VerticalAlignment="Top" CornerRadius="20" Background="{StaticResource AccentSoft}" BorderBrush="#493B74" BorderThickness="1" Padding="12,7">
-          <TextBlock x:Name="StatusText" Text="●  GOTOWY" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold"/>
-        </Border>
+        <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Orientation="Horizontal">
+          <Button x:Name="UpdateButton" Content="Sprawdź aktualizacje" FontSize="10" Padding="12,7" Margin="0,0,10,0" Click="CheckForUpdates"/>
+          <Border CornerRadius="20" Background="{StaticResource AccentSoft}" BorderBrush="#493B74" BorderThickness="1" Padding="12,7">
+            <TextBlock x:Name="StatusText" Text="●  GOTOWY" Foreground="{StaticResource Accent}" FontSize="10" FontWeight="Bold"/>
+          </Border>
+        </StackPanel>
       </Grid>
       <Grid Grid.Row="1">
         <Grid x:Name="OverviewPage">

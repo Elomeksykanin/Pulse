@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.1.2"
+        required: true
+        type: string
+        default: "0.1.2"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install Velopack CLI
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Publish application
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $version = $env:RELEASE_VERSION
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must use X.Y.Z format." }
+          dotnet publish .\Pulse\Pulse.csproj -c Release -r win-x64 --self-contained false -p:Version=$version -o .\publish
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          vpk pack -u Pulse -v $version -p .\publish -e Pulse.exe -r win-x64 -f net8-x64-desktop -o .\releases
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            $version = $env:RELEASE_VERSION
+          }
+          vpk upload github --repoUrl https://github.com/Elomeksykanin/Pulse --publish --releaseName "Pulse v$version" --tag "v$version" --targetCommitish $env:GITHUB_SHA --token $env:GH_TOKEN --outputDir .\releases
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
