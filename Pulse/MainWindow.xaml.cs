@@ -114,13 +114,8 @@ public partial class MainWindow : Window
             }
 
             var version = update.TargetFullRelease.Version;
-            var result = MessageBox.Show(
-                this,
-                $"Dostępna jest wersja {version}. Pobrać aktualizację i uruchomić Pulse ponownie?",
-                "Aktualizacja Pulse",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
-            if (result != MessageBoxResult.Yes)
+            var updateDialog = new UpdateDialog(version.ToString()) { Owner = this };
+            if (updateDialog.ShowDialog() != true)
             {
                 StatusText.Text = "●  DOSTĘPNA AKTUALIZACJA";
                 return;
