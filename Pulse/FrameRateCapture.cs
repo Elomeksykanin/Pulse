@@ -8,18 +8,21 @@ namespace Pulse;
 internal sealed class FrameRateCapture : IDisposable
 {
     private readonly string _filePath;
+    private readonly string _language;
     private readonly Process? _process;
     private int _lastLine;
     private string? _error;
 
-    public FrameRateCapture(int processId)
+    public FrameRateCapture(int processId, string language)
     {
+        _language = language;
         _filePath = string.Empty;
         _process = null;
         var executable = Path.Combine(AppContext.BaseDirectory, "Resources", "PresentMon.exe");
         if (!File.Exists(executable))
         {
-            _error = "Brak modułu przechwytywania FPS (PresentMon.exe).";
+            _error = T("Brak modułu przechwytywania FPS (PresentMon.exe).",
+                "The FPS capture module (PresentMon.exe) is missing.");
             return;
         }
 
@@ -44,13 +47,15 @@ internal sealed class FrameRateCapture : IDisposable
         try
         {
             _process = Process.Start(start);
-            if (_process is null) _error = "Nie udało się uruchomić przechwytywania FPS.";
+            if (_process is null) _error = T("Nie udało się uruchomić przechwytywania FPS.",
+                "Could not start FPS capture.");
         }
         catch (Exception ex)
         {
             _error = ex is System.ComponentModel.Win32Exception { NativeErrorCode: 1223 }
-                ? "Nie udzielono zgody administratora; FPS nie będą dostępne."
-                : $"Nie udało się uruchomić przechwytywania FPS: {ex.Message}";
+                ? T("Nie udzielono zgody administratora; FPS nie będą dostępne.",
+                    "Administrator permission was not granted; FPS data will be unavailable.")
+                : $"{T("Nie udało się uruchomić przechwytywania FPS:", "Could not start FPS capture:")} {ex.Message}";
         }
     }
 
@@ -60,8 +65,10 @@ internal sealed class FrameRateCapture : IDisposable
         {
             if (_error is not null || _process is not { HasExited: true }) return _error;
             return _process.ExitCode == 6
-                ? "PresentMon nie mógł uruchomić sesji ETW. Sprawdź uprawnienia i konflikty z innymi narzędziami monitorującymi."
-                : $"PresentMon zakończył pracę bez danych (kod {_process.ExitCode}).";
+                ? T("PresentMon nie mógł uruchomić sesji ETW. Sprawdź uprawnienia i konflikty z innymi narzędziami monitorującymi.",
+                    "PresentMon could not start an ETW session. Check permissions and conflicts with other monitoring tools.")
+                : T($"PresentMon zakończył pracę bez danych (kod {_process.ExitCode}).",
+                    $"PresentMon exited without data (code {_process.ExitCode}).");
         }
     }
 
@@ -91,7 +98,8 @@ internal sealed class FrameRateCapture : IDisposable
 
         if (frameIndex < 0)
         {
-            _error = "PresentMon zwrócił nieznany format danych FPS.";
+            _error = T("PresentMon zwrócił nieznany format danych FPS.",
+                "PresentMon returned an unrecognized FPS data format.");
             return samples;
         }
 
@@ -127,7 +135,7 @@ internal sealed class FrameRateCapture : IDisposable
             }
             catch (Exception ex)
             {
-                _error ??= $"Nie udało się zatrzymać przechwytywania FPS: {ex.Message}";
+                _error ??= $"{T("Nie udało się zatrzymać przechwytywania FPS:", "Could not stop FPS capture:")} {ex.Message}";
             }
         }
     }
@@ -150,6 +158,8 @@ internal sealed class FrameRateCapture : IDisposable
 
     private static bool TryParse(string value, out double number)
         => double.TryParse(value.Trim().Trim('"'), NumberStyles.Float, CultureInfo.InvariantCulture, out number);
+
+    private string T(string polish, string english) => _language == "en" ? english : polish;
 }
 
 internal sealed record FrameSample(double TimestampMs, double FrameTimeMs, double? GpuBusyMs, string SwapChain);

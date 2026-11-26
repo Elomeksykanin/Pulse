@@ -44,7 +44,6 @@ public partial class MainWindow : Window
     private bool _generalSampleBusy;
     private bool _generalAnalysisRunning;
     private bool _updateCheckRunning;
-    private bool _suppressLanguageChange;
     private string _language = "pl";
     private string _lastGeneralReport = "";
     private DateTime _generalAnalysisStartedAt;
@@ -63,13 +62,8 @@ public partial class MainWindow : Window
         _preferences = preferences;
         _language = _preferences.Language is "en" ? "en" : "pl";
         InitializeComponent();
-        _suppressLanguageChange = true;
-        LanguageSelector.SelectedValue = _language;
         UiLanguage.Apply(this, _language);
-        _suppressLanguageChange = false;
-        AppVersionText.Text = UiLanguage.Get(
-            $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.8"}",
-            _language);
+        AppVersionText.Text = $"{T("Wersja Beta", "Beta version")} {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.2.0"}";
         SetNavigation(NavOverview);
         SetResultsVisibility(false, false);
         _timer.Tick += async (_, _) => await SampleAsync();
@@ -86,50 +80,6 @@ public partial class MainWindow : Window
             _frameRateCapture?.Dispose();
             try { _hardwareSensors?.Dispose(); } catch { }
         };
-    }
-
-    private void LanguageChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressLanguageChange || LanguageSelector.SelectedValue is not string language || language is not ("pl" or "en"))
-            return;
-
-        _language = language;
-        _preferences.Language = language;
-        try
-        {
-            _preferences.Save();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            MessageBox.Show(this, $"Język zmieniono, ale nie udało się zapisać ustawienia:\n{ex.Message}",
-                "Ustawienia języka", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        UiLanguage.Apply(this, language);
-        AppVersionText.Text = UiLanguage.Get(
-            $"Wersja Beta {typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "0.1.8"}",
-            language);
-        UpdateSelectedGame();
-        SetAwaitingText(_timer.IsEnabled);
-        if (_timer.IsEnabled)
-        {
-            MonitorButton.Content = T("■  Zakończ pomiar", "■  Stop monitoring");
-            StatusText.Text = T("●  POMIAR W TOKU", "●  MONITORING");
-            UpdateFrameMetrics();
-        }
-        else if (SummaryPanel.Visibility == Visibility.Visible)
-        {
-            MonitorButton.Content = T("▶  Rozpocznij", "▶  Start monitoring");
-            SummaryHeading.Text = $"{T("WYNIK SESJI", "SESSION RESULTS")}  ·  {DateTime.Now:HH:mm}";
-            SummaryText.Text = BuildSummary();
-        }
-        if (_generalAnalysisRunning)
-            GeneralStatusText.Text = T("Analiza jest w toku.", "Analysis is running.");
-        else if (_generalSystemSamples.Count > 0)
-            GeneralStatusText.Text = T(
-                $"Analiza zakończona • {_generalSystemSamples.Count} próbek systemu.",
-                $"Analysis complete • {_generalSystemSamples.Count} system samples.");
-        if (_generalSystemSamples.Count > 0 && !_generalAnalysisRunning)
-            RenderGeneralReport(BuildGeneralAnalysisReport());
     }
 
     private async void CheckForUpdates(object sender, RoutedEventArgs e)
@@ -580,14 +530,14 @@ public partial class MainWindow : Window
         StatusText.Foreground = (Brush)FindResource("Muted");
         try
         {
-            var info = await Task.Run(ReadHardware);
+            var info = await Task.Run(() => ReadHardware(_language));
             OverviewSystemValue.Text = info.System;
             OverviewCpuValue.Text = info.Cpu;
             OverviewRamValue.Text = info.Ram;
             OverviewGpuValue.Text = string.Join("\n\n", info.Gpus);
             OverviewDiskValue.Text = string.Join("\n", info.Disks);
             OverviewAdviceText.Text = info.Advice;
-            OverviewCompatibilityValue.Text = EvaluateCompatibility(info);
+            OverviewCompatibilityValue.Text = EvaluateCompatibility(info, _language);
             StatusText.Text = T("●  GOTOWY", "●  READY");
             StatusText.Foreground = (Brush)FindResource("Accent");
         }
@@ -603,30 +553,47 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string EvaluateCompatibility(HardwareInfo info)
+    private static string EvaluateCompatibility(HardwareInfo info, string language)
     {
+        var english = language == "en";
         var observations = new List<string>();
         var gpu = info.GpuModels.FirstOrDefault();
         if (string.IsNullOrWhiteSpace(info.CpuModel) || string.IsNullOrWhiteSpace(gpu))
-            observations.Add("Nie udało się rozpoznać modelu procesora lub karty graficznej, więc nie można ich porównać.");
+            observations.Add(english
+                ? "Could not identify the processor or graphics card model, so they cannot be compared."
+                : "Nie udało się rozpoznać modelu procesora lub karty graficznej, więc nie można ich porównać.");
         else if (TryGetCpuTier(info.CpuModel, out var cpuTier) && TryGetGpuTier(gpu, out var gpuTier))
         {
             var difference = cpuTier - gpuTier;
             observations.Add(difference switch
             {
-                >= 2 => $"Szacunkowo: {info.CpuModel} powinien mieć zapas względem {gpu} w większości gier. Ograniczeniem częściej będzie karta graficzna.",
-                <= -2 => $"Szacunkowo: {info.CpuModel} może ograniczać {gpu}, szczególnie w grach procesorowych i przy wysokim FPS.",
-                _ => $"Szacunkowo: {info.CpuModel} i {gpu} są podobnej klasy i powinny tworzyć dość wyrównany zestaw."
+                >= 2 => english
+                    ? $"Estimate: {info.CpuModel} should have headroom over {gpu} in most games; the graphics card is more likely to be the limit."
+                    : $"Szacunkowo: {info.CpuModel} powinien mieć zapas względem {gpu} w większości gier. Ograniczeniem częściej będzie karta graficzna.",
+                <= -2 => english
+                    ? $"Estimate: {info.CpuModel} may limit {gpu}, especially in CPU-heavy games or at high frame rates."
+                    : $"Szacunkowo: {info.CpuModel} może ograniczać {gpu}, szczególnie w grach procesorowych i przy wysokim FPS.",
+                _ => english
+                    ? $"Estimate: {info.CpuModel} and {gpu} are in a similar class and should make a fairly balanced combination."
+                    : $"Szacunkowo: {info.CpuModel} i {gpu} są podobnej klasy i powinny tworzyć dość wyrównany zestaw."
             });
         }
         else
-            observations.Add($"Nie mam reguły porównawczej dla modeli „{info.CpuModel}” i „{gpu}”, więc nie chcę zgadywać ich balansu.");
+            observations.Add(english
+                ? $"There is no comparison rule for “{info.CpuModel}” and “{gpu}”, so their balance cannot be estimated reliably."
+                : $"Nie mam reguły porównawczej dla modeli „{info.CpuModel}” i „{gpu}”, więc nie chcę zgadywać ich balansu.");
 
         if (info.RamGb < 16)
-            observations.Add($"Wykryto {info.RamGb:0.#} GB RAM — 16 GB lub więcej to praktyczny punkt odniesienia do wielu współczesnych gier.");
+            observations.Add(english
+                ? $"Detected {info.RamGb:0.#} GB RAM — 16 GB or more is a practical baseline for many current games."
+                : $"Wykryto {info.RamGb:0.#} GB RAM — 16 GB lub więcej to praktyczny punkt odniesienia do wielu współczesnych gier.");
         if (info.CpuCores < 4)
-            observations.Add($"Procesor ma {info.CpuCores} rdzenie — w części gier może ograniczać wydajność.");
-        observations.Add("To orientacyjna ocena klas sprzętu, nie pomiar FPS. Wynik zależy od gry, rozdzielczości i ustawień; zasilacz oraz zgodność płyty głównej nie są tu sprawdzane.");
+            observations.Add(english
+                ? $"The processor has {info.CpuCores:0} cores, which may limit performance in some games."
+                : $"Procesor ma {info.CpuCores:0} rdzenie — w części gier może ograniczać wydajność.");
+        observations.Add(english
+            ? "This is a rough comparison of hardware tiers, not an FPS measurement. Results depend on the game, resolution, and settings; PSU and motherboard compatibility are not checked."
+            : "To orientacyjna ocena klas sprzętu, nie pomiar FPS. Wynik zależy od gry, rozdzielczości i ustawień; zasilacz oraz zgodność płyty głównej nie są tu sprawdzane.");
         return string.Join("\n\n", observations);
     }
 
@@ -690,8 +657,9 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private static HardwareInfo ReadHardware()
+    private static HardwareInfo ReadHardware(string language)
     {
+        var english = language == "en";
         const string script = @"
 $ErrorActionPreference='Stop'
 $cpu=Get-CimInstance Win32_Processor | Select-Object -First 1 Name,NumberOfCores,NumberOfLogicalProcessors
@@ -721,33 +689,50 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
             .ToArray();
         var gpus = root.GetProperty("Gpus").EnumerateArray().Select(g =>
         {
-            var name = GetString(g, "Name") ?? "Nieznana karta";
+            var name = GetString(g, "Name") ?? (english ? "Unknown graphics card" : "Nieznana karta");
             var vram = GetNumber(g, "VRAM");
             var driver = GetString(g, "Driver");
-            return "•  " + name + (vram is > 0 ? $"  ·  VRAM ok. {vram:0.#} GB" : "") + (string.IsNullOrWhiteSpace(driver) ? "" : $"\n   Sterownik {driver}");
+            var vramLabel = english ? "VRAM approx." : "VRAM ok.";
+            var driverLabel = english ? "Driver" : "Sterownik";
+            return "•  " + name + (vram is > 0 ? $"  ·  {vramLabel} {vram:0.#} GB" : "") + (string.IsNullOrWhiteSpace(driver) ? "" : $"\n   {driverLabel} {driver}");
         }).ToArray();
         var disks = root.GetProperty("Disks").EnumerateArray().Select(d =>
         {
-            var name = GetString(d, "Name") ?? "Dysk";
+            var name = GetString(d, "Name") ?? (english ? "Drive" : "Dysk");
             var free = GetNumber(d, "Free");
             var size = GetNumber(d, "Size");
-            return $"•  {name}     {free:0.#} GB wolne z {size:0.#} GB";
+            return english
+                ? $"•  {name}     {free:0.#} GB free of {size:0.#} GB"
+                : $"•  {name}     {free:0.#} GB wolne z {size:0.#} GB";
         }).ToArray();
         var advice = new List<string>();
-        if (ramGb < 8) advice.Add("Mniej niż 8 GB RAM może powodować doczytywanie i przycięcia.");
+        if (ramGb < 8) advice.Add(english
+            ? "Less than 8 GB RAM may cause extra loading and stuttering."
+            : "Mniej niż 8 GB RAM może powodować doczytywanie i przycięcia.");
         foreach (var d in root.GetProperty("Disks").EnumerateArray())
         {
             var free = GetNumber(d, "Free"); var size = GetNumber(d, "Size");
-            if (size > 0 && free / size < .1) advice.Add($"Dysk {GetString(d, "Name")} ma mniej niż 10% wolnego miejsca.");
+            if (size > 0 && free / size < .1) advice.Add(english
+                ? $"Drive {GetString(d, "Name")} has less than 10% free space."
+                : $"Dysk {GetString(d, "Name")} ma mniej niż 10% wolnego miejsca.");
         }
-        advice.Add("Przy spadku FPS porównaj obciążenie CPU i GPU oraz sprawdź temperatury.");
-        advice.Add("Wysoki CPU procesu gry przy niskim GPU może wskazywać limit procesora, ale sprawdź także programy działające w tle.");
-        advice.Add("Nie wymieniaj części na podstawie samych nazw. Zbierz pomiary w konkretnej grze.");
+        advice.Add(english
+            ? "When FPS drops, compare CPU and GPU load and check temperatures."
+            : "Przy spadku FPS porównaj obciążenie CPU i GPU oraz sprawdź temperatury.");
+        advice.Add(english
+            ? "High game CPU usage with low GPU usage may indicate a CPU limit; also check background apps."
+            : "Wysoki CPU procesu gry przy niskim GPU może wskazywać limit procesora, ale sprawdź także programy działające w tle.");
+        advice.Add(english
+            ? "Do not replace hardware based on model names alone. Measure performance in a specific game."
+            : "Nie wymieniaj części na podstawie samych nazw. Zbierz pomiary w konkretnej grze.");
         var cpuCores = GetNumber(cpu, "NumberOfCores");
         return new HardwareInfo(GetString(os, "Caption") ?? "Windows",
-            $"{cpuModel}\nRdzenie: {cpuCores:0}   ·   Wątki: {GetNumber(cpu, "NumberOfLogicalProcessors"):0}",
-            $"{ramGb:0.#} GB", ramGb, cpuCores, cpuModel, gpuModels, gpus.Length == 0 ? ["Nie wykryto karty graficznej."] : gpus,
-            disks.Length == 0 ? ["Nie wykryto dysków."] : disks, string.Join("\n\n", advice));
+            english
+                ? $"{cpuModel}\nCores: {cpuCores:0}   ·   Threads: {GetNumber(cpu, "NumberOfLogicalProcessors"):0}"
+                : $"{cpuModel}\nRdzenie: {cpuCores:0}   ·   Wątki: {GetNumber(cpu, "NumberOfLogicalProcessors"):0}",
+            $"{ramGb:0.#} GB", ramGb, cpuCores, cpuModel, gpuModels,
+            gpus.Length == 0 ? [english ? "No graphics card detected." : "Nie wykryto karty graficznej."] : gpus,
+            disks.Length == 0 ? [english ? "No drives detected." : "Nie wykryto dysków."] : disks, string.Join("\n\n", advice));
     }
 
     private static string? GetString(JsonElement element, string name) => element.TryGetProperty(name, out var p) && p.ValueKind != JsonValueKind.Null ? p.ToString() : null;
@@ -755,11 +740,24 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
 
     private void RefreshGames(object? sender, RoutedEventArgs? e)
     {
-        _games = Process.GetProcesses().Select(p =>
+        var games = new List<GameWindowInfo>();
+        foreach (var process in Process.GetProcesses())
         {
-            try { return new GameWindowInfo(p.Id, p.ProcessName, p.MainWindowTitle); }
-            catch { return null; }
-        }).Where(g => g is { Title.Length: > 0 }).Cast<GameWindowInfo>().OrderBy(g => g.Title).ToArray();
+            using (process)
+            {
+                try
+                {
+                    var title = process.MainWindowTitle;
+                    if (!string.IsNullOrWhiteSpace(title))
+                        games.Add(new GameWindowInfo(process.Id, process.ProcessName, title));
+                }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+                catch (UnauthorizedAccessException) { }
+                catch (NotSupportedException) { }
+            }
+        }
+        _games = games.OrderBy(game => game.Title).ToArray();
         if (_selectedGame is not null && !_games.Any(g => g.ProcessId == _selectedGame.ProcessId))
         {
             _selectedGame = null;
@@ -1148,7 +1146,7 @@ $disk=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object
         _captureError = null;
         FpsSubMetric.ToolTip = null;
         _frameRateCapture?.Dispose();
-        _frameRateCapture = new FrameRateCapture(_selectedGame!.ProcessId);
+        _frameRateCapture = new FrameRateCapture(_selectedGame!.ProcessId, _language);
         _captureError = _frameRateCapture.Error;
         FpsSubMetric.Text = _captureError ?? T("uruchamiam licznik klatek…", "starting frame capture…");
         FpsSubMetric.ToolTip = _captureError;

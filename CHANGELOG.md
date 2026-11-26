@@ -1,3 +1,15 @@
+# Pulse 0.2.0
+
+## Polski
+- Usunięto dodatkowy wybór języka z menu głównego — język wybiera się na ekranie startowym.
+- Uzupełniono angielskie tłumaczenia wyników skanu sprzętu i komunikatów pomiaru FPS.
+- Usprawniono widoki przeglądu sprzętu, analizy ogólnej i pomiaru gry.
+
+## English
+- Removed the duplicate language selector from the main menu; choose the language on the startup screen.
+- Completed English translations for hardware scan results and FPS monitoring messages.
+- Improved the hardware overview, general analysis, and game monitoring views.
+
 # Pulse 0.1.9
 
 ## Polski
