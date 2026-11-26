@@ -6,7 +6,12 @@ namespace Pulse;
 
 public partial class SplashWindow : Window
 {
-    public SplashWindow() => InitializeComponent();
+    public SplashWindow()
+    {
+        InitializeComponent();
+        var version = typeof(SplashWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        VersionLabel.Text = $"UWAGA  •  WERSJA BETA {version}";
+    }
 
     public event EventHandler? EnterRequested;
 
